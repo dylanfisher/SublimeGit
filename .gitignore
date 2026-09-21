@@ -1,0 +1,10 @@
+.DS_Store
+.cache
+.coverage
+coverage.xml
+*.pyc
+*.sublime-project
+docs/_build/
+
+# original zipped package from Package Control, kept as a backup
+SublimeGit.sublime-package.orig

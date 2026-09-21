@@ -1,0 +1,36 @@
+{
+    "name": "SublimeGit Blame",
+    "scopeName": "text.git-blame",
+    "fileTypes": ["git-blame"],
+    "patterns": [
+        {
+            "name": "meta.git-blame.notcommitted",
+            "match": "^(\\^)? ?(0+) (.+)? ?(\\()(Not Committed Yet)  (\\w+ \\w+ \\d+ \\d\\d:\\d\\d:\\d\\d \\d{4})(\\)) (.*)",
+            "captures": {
+                "1": { "name": "variable.parameter.git-blame.boundary"},
+                "2": { "name": "comment.other.git-blame.hex"},
+                "3": { "name": "string.other.git-blame.file"},
+                "4": { "name": "comment.other.git-blame.paren"},
+                "5": { "name": "constant.other.git-blame.author"},
+                "6": { "name": "comment.other.git-blame.date"},
+                "7": { "name": "comment.other.git-blame.paren"},
+                "8": { "name": "text"}
+            }
+        },
+        {
+            "name": "meta.git-blame.line",
+            "match": "^(\\^)? ?([0-9a-f]+) (.+)? ?(\\()(.+)  (\\w+ \\w+ \\d+ \\d\\d:\\d\\d:\\d\\d \\d{4})(\\)) (.*)",
+            "captures": {
+                "1": { "name": "variable.parameter.git-blame.boundary"},
+                "2": { "name": "entity.other.git-blame.hex"},
+                "3": { "name": "string.other.git-blame.file"},
+                "4": { "name": "comment.other.git-blame.paren"},
+                "5": { "name": "support.type.git-blame.author"},
+                "6": { "name": "comment.other.git-blame.date"},
+                "7": { "name": "comment.other.git-blame.paren"},
+                "8": { "name": "text"}
+            }
+        }
+    ],
+    "uuid": "c069541f-b5d7-4fdf-8c1c-88a3d77b4de9"
+}
