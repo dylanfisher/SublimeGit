@@ -1,0 +1,106 @@
+%YAML 1.2
+---
+# Syntax for the *git-status* view built by sgit/status.py.
+#
+# The status view's navigation, staging and key bindings are all driven by
+# these scopes (see SECTION_SELECTOR_PREFIX / SECTIONS in sgit/status.py and
+# Default.sublime-keymap), so the scope names must not change.
+name: SublimeGit Status
+scope: text.git-status
+version: 2
+hidden: true
+file_extensions:
+  - git-status
+
+contexts:
+  main:
+    # The help block at the bottom of the view; runs to the end of the buffer.
+    - match: '^# Movement:'
+      push: help
+
+    - match: '^Remote:\s+(.+) @ (.+)\n'
+      scope: comment.git-status.header.remote
+      captures:
+        1: string.other.git-status.remote.name
+        2: string.other.git-status.remote.url
+    - match: '^Local:\s+(.+) (.+)\n'
+      scope: comment.git-status.header.local
+      captures:
+        1: support.type.git-status.branch
+        2: comment.other.git-status.dir
+    - match: '^(Head:\s+)(\w+) (.+)\n'
+      scope: meta.git-status.header.head
+      captures:
+        1: comment.other.git-status.head
+        2: entity.other.git-status.hex
+        3: entity.other.git-status.log
+    - match: '^(Nothing to commit \(working directory clean\))\n'
+      scope: meta.git-status.clean
+      captures:
+        1: markup.inserted.git-status.clean
+
+    # Sections: a header line, one item per line, terminated by a blank line.
+    - match: '^(Stashes:\n)'
+      captures:
+        1: constant.other.git-status.header
+      push: stashes
+    - match: '^(Untracked files:\n)'
+      captures:
+        1: constant.other.git-status.header
+      push: untracked_files
+    # "Changes:" replaces "Unstaged changes:" when nothing is staged; both are
+    # scoped as unstaged_changes.
+    - match: '^((?:Unstaged changes:\n)|(?:Changes:\n))'
+      captures:
+        1: constant.other.git-status.header
+      push: unstaged_changes
+    - match: '^(Staged changes:\n)'
+      captures:
+        1: constant.other.git-status.header
+      push: staged_changes
+
+  help:
+    - meta_scope: comment.git-status.help
+    - match: '((?:(?:ctrl\+|super\+|alt\+|shift\+)*\w)?(?:\w-)?\w*) ='
+      scope: comment.git-status.help
+      captures:
+        1: string.other.git-status.help.key
+
+  stashes:
+    - meta_scope: meta.git-status.stashes
+    - include: section-end
+    - match: '\t(.+): (?:WIP )?[oO]n (.+): (.+)\n'
+      scope: meta.git-status.line
+      captures:
+        1: meta.git-status.stash.name
+        2: meta.git-status.stash.branch
+        3: meta.git-status.stash.title
+
+  untracked_files:
+    - meta_scope: meta.git-status.untracked_files
+    - include: section-end
+    - match: '\t(.+)\n'
+      scope: meta.git-status.line
+      captures:
+        1: meta.git-status.file
+
+  unstaged_changes:
+    - meta_scope: meta.git-status.unstaged_changes
+    - include: section-end
+    - include: file-status-line
+
+  staged_changes:
+    - meta_scope: meta.git-status.staged_changes
+    - include: section-end
+    - include: file-status-line
+
+  # "\t<Status label> <path>"; for renames the path is "old -> new".
+  file-status-line:
+    - match: '\t(\w+) *(.+)\n'
+      scope: meta.git-status.line
+      captures:
+        2: meta.git-status.file
+
+  section-end:
+    - match: '^\n$'
+      pop: 1

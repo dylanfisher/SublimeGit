@@ -1,0 +1,53 @@
+; SYNTAX TEST "Packages/SublimeGit/syntax/SublimeGit Show.sublime-syntax"
+commit a80da22347e404b0e71f552a06a9637d8c67a554
+;<- source.git-show source.git-show.commit - source.git-show.commit.sha
+;^^^^^^ source.git-show.commit - source.git-show.commit.sha
+;      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.git-show.commit source.git-show.commit.sha
+Author: Alexandria Ocasio <test@example.com>
+;<- source.git-show.author - source.git-show.author.name
+;       ^^^^^^^^^^^^^^^^^ source.git-show.author source.git-show.author.name
+;                         ^ source.git-show.author - source.git-show.author.email
+;                          ^^^^^^^^^^^^^^^^ source.git-show.author source.git-show.author.email
+;                                          ^ source.git-show.author - source.git-show.author.email
+Date:   Mon Sep 21 12:15:51 2026 -0700
+;<- source.git-show.date - source.git-show.date.date
+;       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.git-show.date source.git-show.date.date
+
+    Add helper function (second commit)
+;<- source.git-show - meta - markup
+;   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.git-show - meta - markup
+
+diff --git a/sgit/status.py b/sgit/status.py
+;<- source.git-show source.git-diff.command meta.diff
+;          ^^^^^^^^^^^^^^^^ source.git-diff.command meta.diff.git-diff.header.from-file
+;                           ^^^^^^^^^^^^^^^^ source.git-diff.command meta.diff.git-diff.header.to-file
+index 0ea2873..3e63a69 100644
+;<- meta.diff.git-diff.header.extended.index
+;     ^^^^^^^ meta.diff.git-diff.header.extended.index.from-sha
+;              ^^^^^^^ meta.diff.git-diff.header.extended.index.to-sha
+;                      ^^^^^^ meta.diff.git-diff.header.extended.index.mode
+--- a/sgit/status.py
+;<- meta.diff.header.from-file punctuation.definition.from-file.diff
++++ b/sgit/status.py
+;<- meta.diff.header.to-file punctuation.definition.to-file.diff
+@@ -6,3 +6,6 @@ def build(repo):
+;<- meta.diff.range.unified punctuation.definition.range.begin.diff
+;               ^^^^^^^^^^^^^^^^ meta.toc-list.hunk.diff entity.name.section.diff
+ 
+ def helper():
+;<- source.git-show - markup - meta
+     pass
++
+;<- markup.inserted.diff punctuation.definition.inserted.diff
++def added_later():
+;<- markup.inserted.diff punctuation.definition.inserted.diff
+;^^^^^^^^^^^^^^^^^^ markup.inserted.diff - punctuation
++    return 1
+;    ^^^^^^^^ markup.inserted.diff
+commit 2f9562b0e5c1d0f7a2b3c4d5e6f708192a3b4c5d
+;<- source.git-show.commit
+;      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.git-show.commit source.git-show.commit.sha
+Author: Test User <test@example.com>
+;       ^^^^^^^^^ source.git-show.author source.git-show.author.name
+Date:   Mon Sep 21 12:15:51 2026 -0700
+;       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ source.git-show.date source.git-show.date.date

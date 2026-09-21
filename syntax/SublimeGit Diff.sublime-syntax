@@ -1,0 +1,45 @@
+%YAML 1.2
+---
+# Syntax for the *git-diff* views built by sgit/diff.py: the git extended
+# headers are scoped here, everything else is the stock Diff syntax.
+name: SublimeGit Diff
+scope: source.git-diff
+version: 2
+hidden: true
+file_extensions:
+  - git-diff
+
+contexts:
+  main:
+    - match: '^(Nothing to stage \(no difference between working tree and index\)|Nothing to unstage \(no changes in index\))'
+      scope: meta.git-diff.clean
+      captures:
+        1: markup.inserted.git-diff.clean
+    - match: '^(diff --git )(\w+/.+) (\w+/.+)\n'
+      scope: source.git-diff.command
+      captures:
+        1: meta.diff
+        2: meta.diff.git-diff.header.from-file
+        3: meta.diff.git-diff.header.to-file
+    - match: '^index (\w+)..(\w+) ?(\d+)?\n'
+      scope: meta.diff.git-diff.header.extended.index
+      captures:
+        1: meta.diff.git-diff.header.extended.index.from-sha
+        2: meta.diff.git-diff.header.extended.index.to-sha
+        3: meta.diff.git-diff.header.extended.index.mode
+    - match: '^(:?old mode|new mode|deleted file mode|new file mode) (\d+)\n'
+      scope: meta.diff.git-diff.header.extended.modechange
+      captures:
+        1: meta.diff.git-diff.header.extended.modechange.mode
+    - match: '^(There are no (staged|unstaged) changes to this file)\n'
+      scope: meta.git-diff.clean
+      captures:
+        1: markup.inserted.git-diff.clean
+    - match: '^(:?copy from|copy to|rename from|rename to) (.+)\n'
+      scope: meta.diff.git-diff.header.extended.pathchange
+      captures:
+        1: meta.diff.git-diff.header.extended.pathchange.path
+    # ST4's Diff.sublime-syntax "main" pushes a never-popping "diffs" context on
+    # the first line it sees, which would disable every pattern above for the
+    # rest of the buffer; include its line-level patterns directly instead.
+    - include: scope:source.diff#diffs

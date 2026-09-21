@@ -1092,9 +1092,8 @@ class TestStatusRefreshCoalescing(object):
 class TestStatusViewCreation(object):
     """Pins the view the ``git_status`` command opens.
 
-    Refactor (d) swaps ``set_syntax_file`` for ``assign_syntax`` and the
-    .tmLanguage file for a .sublime-syntax; the *settings* it applies and the
-    refresh it triggers must survive that.
+    The view gets the .sublime-syntax via ``assign_syntax``; the *settings* it
+    applies and the refresh it triggers are pinned here too.
     """
 
     def test_creates_configured_scratch_view_and_refreshes(self, settings, tmp_repo):

@@ -26,7 +26,7 @@ class GitCustomCommand(WindowCommand, GitCmd, GitErrorHelper):
     * **async**: ``true`` to run asynchronously, ``false`` otherwise. Default: ``false``
     * **output**: ``"view"`` for a new buffer, ``"panel"`` for an output panel, ``null`` for no output. Default: ``"view"``
     * **syntax**: If output is set to ``"view"``, the new buffer will get this syntax file. Should be a name along the
-                  lines of ``Packages/Python/Python.tmLanguage``. To see the current syntax for a view, execute
+                  lines of ``Packages/Python/Python.sublime-syntax``. To see the current syntax for a view, execute
                   ``view.settings().get('syntax')`` from the console.
 
     .. note::
@@ -90,7 +90,7 @@ class GitCustomCommand(WindowCommand, GitCmd, GitErrorHelper):
             self.output_view.set_scratch(True)
             self.output_view.set_read_only(True)
             if self.syntax:
-                self.output_view.set_syntax_file(self.syntax)
+                self.output_view.assign_syntax(self.syntax)
 
             self.output_view.settings().set('git_view', 'custom')
             self.output_view.settings().set('git_repo', repo)

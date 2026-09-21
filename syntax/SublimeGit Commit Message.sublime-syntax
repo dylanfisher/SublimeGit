@@ -1,0 +1,53 @@
+%YAML 1.2
+---
+# Syntax for the COMMIT_EDITMSG view built by sgit/commit.py: the message
+# itself is plain text, the "# ..." status block is a comment and a verbose
+# template ends with a git diff.
+name: SublimeGit Commit Message
+scope: text.git-commit
+version: 2
+hidden: true
+file_extensions:
+  - COMMIT_EDITMSG
+
+contexts:
+  main:
+    - match: '^\s*# On branch (.*)\n'
+      scope: comment.line.number-sign.git-commit
+      captures:
+        1: support.type.git-commit.branch
+    - match: '^(\s*# Your branch is )(ahead of '')(.+)('' by )(\d+ .+)\.\n'
+      scope: meta.git-commit.remote.status
+      captures:
+        1: comment.line.number-sign.git-commit
+        2: entity.other.git-commit.remote.ahead
+        3: string.other.git-commit.remote.name
+        4: entity.other.git-commit.remote.ahead
+        5: entity.other.git-commit.remote.num-commits
+    - match: '^\s*# (Changes to be committed:)'
+      scope: comment.line.number-sign.git-commit
+      captures:
+        1: constant.other.git-commit.header
+    - match: '^\s*# (Changes not staged for commit:)'
+      scope: comment.line.number-sign.git-commit
+      captures:
+        1: constant.other.git-commit.header
+    - match: '^\s*# (Untracked files:)'
+      scope: comment.line.number-sign.git-commit
+      captures:
+        1: constant.other.git-commit.header
+    - match: '^\s*# (warning:.+)'
+      scope: comment.line.number-sign.git-commit
+      captures:
+        1: markup.deleted.warning.git-commit
+    # "#\tmodified:   path"
+    - match: '^\s*((?:#   )|(?:#\t))(.+:)(\s+)(.+)'
+      scope: meta.git-commit.line
+      captures:
+        1: comment.line.number-sign.git-commit
+        2: support.other.git-commit.status
+        3: comment.line.number-sign.git-commit
+        4: support.other.git-commit.file
+    - match: '^\s*#(.*)'
+      scope: comment.line.number-sign.git-commit
+    - include: scope:source.git-diff

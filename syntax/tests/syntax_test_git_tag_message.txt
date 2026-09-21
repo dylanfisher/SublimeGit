@@ -1,0 +1,16 @@
+; SYNTAX TEST "Packages/SublimeGit/syntax/SublimeGit Tag Message.sublime-syntax"
+Release 1.2.0
+;<- text.git-tag - comment
+;^^^^^^^^^^^^ text.git-tag - comment
+
+# Write a message for tag:
+;<- text.git-tag comment.line.number-sign.git-commit
+;^^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit
+#   v1.2.0
+;   ^^^^^^ comment.line.number-sign.git-commit
+  # Lines starting with '#' will be ignored.
+;<- comment.line.number-sign.git-commit
+; ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit
+Not a comment # even with a hash
+;<- text.git-tag - comment
+;             ^^^^^^^^^^^^^^^^^^ text.git-tag - comment

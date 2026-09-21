@@ -1,0 +1,38 @@
+%YAML 1.2
+---
+# Syntax for the blame view built by sgit/blame.py (format_blame):
+#   {boundary}{sha} {file}({author} {date}) {line}
+name: SublimeGit Blame
+scope: text.git-blame
+version: 2
+hidden: true
+file_extensions:
+  - git-blame
+
+variables:
+  date: '\w+ \w+ \d+ \d\d:\d\d:\d\d \d{4}'
+
+contexts:
+  main:
+    - match: '^(\^)? ?(0+) (.+)? ?(\()(Not Committed Yet)  ({{date}})(\)) (.*)'
+      scope: meta.git-blame.notcommitted
+      captures:
+        1: variable.parameter.git-blame.boundary
+        2: comment.other.git-blame.hex
+        3: string.other.git-blame.file
+        4: comment.other.git-blame.paren
+        5: constant.other.git-blame.author
+        6: comment.other.git-blame.date
+        7: comment.other.git-blame.paren
+        8: text
+    - match: '^(\^)? ?([0-9a-f]+) (.+)? ?(\()(.+)  ({{date}})(\)) (.*)'
+      scope: meta.git-blame.line
+      captures:
+        1: variable.parameter.git-blame.boundary
+        2: entity.other.git-blame.hex
+        3: string.other.git-blame.file
+        4: comment.other.git-blame.paren
+        5: support.type.git-blame.author
+        6: comment.other.git-blame.date
+        7: comment.other.git-blame.paren
+        8: text

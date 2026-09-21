@@ -10,7 +10,7 @@ from .status import GIT_WORKING_DIR_CLEAN
 
 
 GIT_COMMIT_VIEW_TITLE = "COMMIT_EDITMSG"
-GIT_COMMIT_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Commit Message.tmLanguage'
+GIT_COMMIT_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Commit Message.sublime-syntax'
 
 GIT_NOTHING_STAGED = 'No changes added to commit. Use s on files/sections in the status view to stage changes.'
 GIT_COMMIT_TEMPLATE = """{old_msg}
@@ -98,7 +98,7 @@ class GitCommitCommand(WindowCommand, GitCommitWindowCmd):
         if not view:
             view = self.window.new_file()
             view.set_name(GIT_COMMIT_VIEW_TITLE)
-            view.set_syntax_file(GIT_COMMIT_VIEW_SYNTAX)
+            view.assign_syntax(GIT_COMMIT_VIEW_SYNTAX)
             view.set_scratch(True)
 
             view.settings().set('git_view', 'commit')
@@ -130,7 +130,7 @@ class GitCommitAmendCommand(GitCommitWindowCmd, WindowCommand):
         if not view:
             view = self.window.new_file()
             view.set_name(GIT_COMMIT_VIEW_TITLE)
-            view.set_syntax_file(GIT_COMMIT_VIEW_SYNTAX)
+            view.assign_syntax(GIT_COMMIT_VIEW_SYNTAX)
             view.set_scratch(True)
 
             view.settings().set('git_view', 'commit')

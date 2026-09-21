@@ -32,7 +32,7 @@ Now, create a file in the ``User`` directory and name it ``Git.sublime-commands`
                 "cmd": "diff master",
                 "output": "view",
                 "async": true,
-                "syntax": "Packages/SublimeGit/syntax/SublimeGit Diff.tmLanguage"
+                "syntax": "Packages/SublimeGit/syntax/SublimeGit Diff.sublime-syntax"
             }
         }
     ]

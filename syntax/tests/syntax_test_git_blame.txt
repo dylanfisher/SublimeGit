@@ -1,0 +1,39 @@
+; SYNTAX TEST "Packages/SublimeGit/syntax/SublimeGit Blame.sublime-syntax"
+^2f9562b (Test User          Mon Sep 21 12:15:51 2026) import os
+;<- text.git-blame meta.git-blame.line variable.parameter.git-blame.boundary
+;^^^^^^^ meta.git-blame.line entity.other.git-blame.hex
+;       ^ meta.git-blame.line - entity - comment
+;        ^ meta.git-blame.line comment.other.git-blame.paren
+;         ^^^^^^^^^^^^^^^^^ meta.git-blame.line support.type.git-blame.author
+;                          ^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-blame.line - support
+;                            ^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-blame.line comment.other.git-blame.date
+;                                                    ^ meta.git-blame.line comment.other.git-blame.paren
+;                                                      ^^^^^^^^^ meta.git-blame.line text
+ a80da22 (Alexandria Ocasio  Mon Sep 21 12:15:51 2026) def added_later():
+;<- text.git-blame meta.git-blame.line - variable.parameter.git-blame.boundary
+;^^^^^^^ meta.git-blame.line entity.other.git-blame.hex
+;         ^^^^^^^^^^^^^^^^^ meta.git-blame.line support.type.git-blame.author
+;                            ^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-blame.line comment.other.git-blame.date
+;                                                      ^^^^^^^^^^^^^^^^^^ meta.git-blame.line text
+ 0000000 (Not Committed Yet  Mon Sep 21 12:15:51 2026)     return 2
+;<- text.git-blame meta.git-blame.notcommitted - meta.git-blame.line
+;^^^^^^^ meta.git-blame.notcommitted comment.other.git-blame.hex
+;        ^ meta.git-blame.notcommitted comment.other.git-blame.paren
+;         ^^^^^^^^^^^^^^^^^ meta.git-blame.notcommitted constant.other.git-blame.author
+;                            ^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-blame.notcommitted comment.other.git-blame.date
+;                                                    ^ meta.git-blame.notcommitted comment.other.git-blame.paren
+;                                                      ^^^^^^^^^^^^ meta.git-blame.notcommitted text
+^2f9562b old_name.txt  (Test User          Mon Sep 21 12:15:51 2026) line one
+;<- meta.git-blame.line variable.parameter.git-blame.boundary
+;        ^^^^^^^^^^^^^^ meta.git-blame.line string.other.git-blame.file
+;                      ^ meta.git-blame.line comment.other.git-blame.paren
+;                                                                    ^^^^^^^^ meta.git-blame.line text
+ 0000000 new_name.txt  (Not Committed Yet  Mon Sep 21 12:15:51 2026) line three
+;        ^^^^^^^^^^^^^^ meta.git-blame.notcommitted string.other.git-blame.file
+;                       ^^^^^^^^^^^^^^^^^ meta.git-blame.notcommitted constant.other.git-blame.author
+2f9562b (Test User  Mon Sep 21 12:15:51 2026) no boundary column
+;<- meta.git-blame.line entity.other.git-blame.hex
+;        ^^^^^^^^^ meta.git-blame.line support.type.git-blame.author
+;                                             ^^^^^^^^^^^^^^^^^^ meta.git-blame.line text
+ a80da22 (Alexandria Ocasio  Mon Sep 21 12:15:51 2026) 
+;^^^^^^^ meta.git-blame.line entity.other.git-blame.hex

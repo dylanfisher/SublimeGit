@@ -8,7 +8,7 @@ from .helpers import GitShowHelper
 
 
 GIT_SHOW_TITLE_PREFIX = '*git-show*: '
-GIT_SHOW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Show.tmLanguage'
+GIT_SHOW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Show.sublime-syntax'
 
 
 class GitShowCommand(WindowCommand, GitCmd):
@@ -40,7 +40,7 @@ class GitShowCommand(WindowCommand, GitCmd):
             view.set_name(title)
             view.set_scratch(True)
             view.set_read_only(True)
-            view.set_syntax_file(GIT_SHOW_SYNTAX)
+            view.assign_syntax(GIT_SHOW_SYNTAX)
 
             view.settings().set('git_view', 'show')
             view.settings().set('git_repo', repo)

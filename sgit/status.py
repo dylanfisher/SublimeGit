@@ -17,7 +17,7 @@ logger = logging.getLogger('SublimeGit.status')
 GOTO_DEFAULT = 'file:1'
 
 GIT_STATUS_VIEW_TITLE_PREFIX = '*git-status*: '
-GIT_STATUS_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Status.tmLanguage'
+GIT_STATUS_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Status.sublime-syntax'
 GIT_STATUS_VIEW_SETTINGS = {
     'translate_tabs_to_spaces': False,
     'draw_white_space': 'none',
@@ -650,7 +650,7 @@ class GitStatusCommand(WindowCommand, GitStatusBuilder):
             view = self.window.new_file()
 
             view.set_name(title)
-            view.set_syntax_file(GIT_STATUS_VIEW_SYNTAX)
+            view.assign_syntax(GIT_STATUS_VIEW_SYNTAX)
             view.set_scratch(True)
             view.set_read_only(True)
 

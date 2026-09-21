@@ -9,7 +9,7 @@ from .helpers import GitStatusHelper, GitRepoHelper
 
 
 GIT_BLAME_TITLE_PREFIX = '*git-blame*: '
-GIT_BLAME_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Blame.tmLanguage'
+GIT_BLAME_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Blame.sublime-syntax'
 
 
 class GitBlameCache(object):
@@ -87,7 +87,7 @@ class GitBlameCommand(WindowCommand, GitCmd, GitStatusHelper):
             view.set_name(title)
             view.set_scratch(True)
             view.set_read_only(True)
-            view.set_syntax_file(GIT_BLAME_SYNTAX)
+            view.assign_syntax(GIT_BLAME_SYNTAX)
 
             view.settings().set('word_wrap', False)
             view.settings().set('git_view', 'blame')

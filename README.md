@@ -59,6 +59,13 @@ Changes from upstream
 
 - Fixed `Git: Switch Repo` always selecting the last repository in the list
   regardless of the choice made.
+- The six `syntax/*.tmLanguage` grammars were converted to `.sublime-syntax`
+  (same scope names; views use `assign_syntax`). Sublime Text 4's own `Diff`
+  syntax pushes a never-popping context on the first line it sees, which made
+  the old `include source.diff` silently disable the SublimeGit scopes for the
+  rest of a diff, show or commit-message buffer; the new grammars include
+  `source.diff#diffs` instead. `syntax/tests/syntax_test_*.txt` pin the scopes
+  (run them with Sublime's "Syntax Tests" build).
 
 The original documentation is at
 [sublimegit.readthedocs.io](http://sublimegit.readthedocs.io/en/latest/) and

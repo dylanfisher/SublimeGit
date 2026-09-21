@@ -1,0 +1,104 @@
+; SYNTAX TEST "Packages/SublimeGit/syntax/SublimeGit Commit Message.sublime-syntax"
+Fix the thing
+;<- text.git-commit - comment - meta - markup
+;^^^^^^^^^^^^ text.git-commit - comment - meta - markup
+
+Body paragraph.
+;^^^^^^^^^^^^^^ text.git-commit - comment - meta - markup
+# Please enter the commit message for your changes. Lines starting
+;<- comment.line.number-sign.git-commit
+;                                                   ^^^^^^^^^^^^^^ comment.line.number-sign.git-commit
+# with '#' will be ignored, and an empty message aborts the commit.
+;                                                ^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit
+# On branch feature/x
+;<- comment.line.number-sign.git-commit - support
+;           ^^^^^^^^^ comment.line.number-sign.git-commit support.type.git-commit.branch
+# Your branch is ahead of 'origin/main' by 3 commits.
+;<- meta.git-commit.remote.status comment.line.number-sign.git-commit
+;^^^^^^^^^^^^^^^^ meta.git-commit.remote.status comment.line.number-sign.git-commit
+;                ^^^^^^^^^^ meta.git-commit.remote.status entity.other.git-commit.remote.ahead
+;                          ^^^^^^^^^^^ meta.git-commit.remote.status string.other.git-commit.remote.name
+;                                     ^^^^^ meta.git-commit.remote.status entity.other.git-commit.remote.ahead
+;                                          ^^^^^^^^^ meta.git-commit.remote.status entity.other.git-commit.remote.num-commits
+;                                                   ^ meta.git-commit.remote.status - entity - comment
+# Your branch is up to date with 'origin/main'.
+;<- comment.line.number-sign.git-commit - meta
+#
+;<- comment.line.number-sign.git-commit
+# Changes to be committed:
+;<- comment.line.number-sign.git-commit - constant
+; ^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit constant.other.git-commit.header
+#   (use "git restore --staged <file>..." to unstage)
+;<- comment.line.number-sign.git-commit - meta
+;                                         ^^^^^^^^^^^ comment.line.number-sign.git-commit - meta
+#	renamed:    old_name.txt -> new_name.txt
+;<- meta.git-commit.line comment.line.number-sign.git-commit
+; ^^^^^^^^ meta.git-commit.line support.other.git-commit.status
+;         ^^^^ meta.git-commit.line comment.line.number-sign.git-commit
+;             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+#	modified:   sgit/status.py
+; ^^^^^^^^^ meta.git-commit.line support.other.git-commit.status
+;             ^^^^^^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+#   new file:   staged_new.txt
+;<- meta.git-commit.line comment.line.number-sign.git-commit
+;   ^^^^^^^^^ meta.git-commit.line support.other.git-commit.status
+;               ^^^^^^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+#
+# Changes not staged for commit:
+; ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit constant.other.git-commit.header
+#   (use "git add <file>..." to update what will be committed)
+#	modified:   README.md
+;             ^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+#
+# Untracked files:
+; ^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit constant.other.git-commit.header
+#	newdir/
+;<- comment.line.number-sign.git-commit - meta.git-commit.line
+; ^^^^^^^ comment.line.number-sign.git-commit - meta.git-commit.line
+#	untracked file.txt
+; ^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit - meta.git-commit.line
+# warning: LF will be replaced by CRLF in foo.txt.
+;<- comment.line.number-sign.git-commit - markup
+; ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit markup.deleted.warning.git-commit
+#
+# ------------------------ >8 ------------------------
+;<- comment.line.number-sign.git-commit
+;                          ^^ comment.line.number-sign.git-commit
+# Do not touch the line above.
+# Everything below will be removed.
+diff --git a/sgit/status.py b/sgit/status.py
+;<- text.git-commit source.git-diff.command meta.diff - comment
+;          ^^^^^^^^^^^^^^^^ source.git-diff.command meta.diff.git-diff.header.from-file
+;                           ^^^^^^^^^^^^^^^^ source.git-diff.command meta.diff.git-diff.header.to-file
+index 3e63a69..34b0748 100644
+;<- meta.diff.git-diff.header.extended.index
+;              ^^^^^^^ meta.diff.git-diff.header.extended.index meta.diff.git-diff.header.extended.index.to-sha
+--- a/sgit/status.py
+;<- meta.diff.header.from-file punctuation.definition.from-file.diff
++++ b/sgit/status.py
+;<- meta.diff.header.to-file punctuation.definition.to-file.diff
+@@ -9,3 +9,6 @@ def helper():
+;<- meta.diff.range.unified punctuation.definition.range.begin.diff
+ 
+ def added_later():
+;<- text.git-commit - markup - meta - comment
+     return 1
++
+;<- markup.inserted.diff punctuation.definition.inserted.diff
++def staged_fn():
+;<- text.git-commit markup.inserted.diff punctuation.definition.inserted.diff
+;^^^^^^^^^^^^^^^^ text.git-commit markup.inserted.diff
++    return 2
+diff --git a/staged_new.txt b/staged_new.txt
+;<- source.git-diff.command meta.diff
+new file mode 100644
+;^^^^^^^^^^^^ meta.diff.git-diff.header.extended.modechange meta.diff.git-diff.header.extended.modechange.mode
+index 0000000..3e75765
+;              ^^^^^^^ meta.diff.git-diff.header.extended.index.to-sha
+--- /dev/null
++++ b/staged_new.txt
+@@ -0,0 +1 @@
++new
+;<- markup.inserted.diff punctuation.definition.inserted.diff
+# a trailing comment is still a comment
+;<- comment.line.number-sign.git-commit - markup

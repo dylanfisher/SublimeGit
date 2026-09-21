@@ -1,0 +1,98 @@
+; SYNTAX TEST "Packages/SublimeGit/syntax/SublimeGit Status.sublime-syntax"
+Remote:   origin @ git@github.com:dylanfisher/sublimegit.git
+;<- text.git-status comment.git-status.header.remote
+;^^^^^^^^^ comment.git-status.header.remote - string
+;         ^^^^^^ comment.git-status.header.remote string.other.git-status.remote.name
+;                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.git-status.header.remote string.other.git-status.remote.url
+Local:    main ~/projects/sublimegit
+;<- comment.git-status.header.local
+;         ^^^^ comment.git-status.header.local support.type.git-status.branch
+;              ^^^^^^^^^^^^^^^^^^^^^ comment.git-status.header.local comment.other.git-status.dir
+Head:     7c358cc Remove Python 2 / ST2 compatibility code
+;<- meta.git-status.header.head comment.other.git-status.head
+;^^^^^^^^^ meta.git-status.header.head comment.other.git-status.head
+;         ^^^^^^^ meta.git-status.header.head entity.other.git-status.hex
+;                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-status.header.head entity.other.git-status.log
+
+Stashes:
+;<- text.git-status meta.git-status.stashes constant.other.git-status.header
+;^^^^^^^ meta.git-status.stashes constant.other.git-status.header
+	0: WIP on main: a80da22 Add helper function (second commit)
+;<- text.git-status meta.git-status.stashes meta.git-status.line - meta.git-status.stash.name
+;^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.name
+; ^^^^^^^^^ meta.git-status.stashes meta.git-status.line - meta.git-status.stash
+;          ^^^^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.branch
+;                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.title
+	1: On main: work in progress: notes
+;^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.name
+;      ^^^^^^^^^^^^^^^^^^^^^^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.branch
+;                              ^^^^^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.title
+
+Untracked files:
+;<- meta.git-status.untracked_files constant.other.git-status.header - meta.git-status.stashes
+	newdir/a.txt
+;<- meta.git-status.untracked_files meta.git-status.line - meta.git-status.file
+;^^^^^^^^^^^^ meta.git-status.untracked_files meta.git-status.line meta.git-status.file
+	untracked file.txt
+;^^^^^^^^^^^^^^^^^^ meta.git-status.untracked_files meta.git-status.line meta.git-status.file
+
+Unstaged changes:
+;<- meta.git-status.unstaged_changes constant.other.git-status.header - meta.git-status.untracked_files
+	Modified   README.md
+;<- text.git-status meta.git-status.unstaged_changes meta.git-status.line - meta.git-status.file
+;^^^^^^^^^^^ meta.git-status.unstaged_changes meta.git-status.line - meta.git-status.file
+;           ^^^^^^^^^ meta.git-status.unstaged_changes meta.git-status.line meta.git-status.file
+	Deleted    docs/old.rst
+;           ^^^^^^^^^^^^ meta.git-status.unstaged_changes meta.git-status.line meta.git-status.file
+	Typechange link
+;^^^^^^^^^^^ meta.git-status.line - meta.git-status.file
+;           ^^^^ meta.git-status.unstaged_changes meta.git-status.line meta.git-status.file
+
+Staged changes:
+;<- meta.git-status.staged_changes constant.other.git-status.header - meta.git-status.unstaged_changes
+	Renamed    old_name.txt -> new_name.txt
+;^^^^^^^^^^^ meta.git-status.staged_changes meta.git-status.line - meta.git-status.file
+;           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-status.staged_changes meta.git-status.line meta.git-status.file
+	Added      staged_new.txt
+;           ^^^^^^^^^^^^^^ meta.git-status.staged_changes meta.git-status.line meta.git-status.file
+
+Changes:
+;<- meta.git-status.unstaged_changes constant.other.git-status.header - meta.git-status.staged_changes
+	Modified   sgit/status.py
+;           ^^^^^^^^^^^^^^ meta.git-status.unstaged_changes meta.git-status.line meta.git-status.file
+
+Local:    (no branch) ~/projects/sublimegit
+;<- text.git-status comment.git-status.header.local - meta.git-status
+;         ^^^^^^^^^^^ comment.git-status.header.local support.type.git-status.branch
+Head:     nothing committed (yet)
+;         ^^^^^^^ meta.git-status.header.head entity.other.git-status.hex
+;                 ^^^^^^^^^^^^^^^ meta.git-status.header.head entity.other.git-status.log
+Nothing to commit (working directory clean)
+;<- meta.git-status.clean markup.inserted.git-status.clean
+;^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-status.clean markup.inserted.git-status.clean
+
+# Movement:
+;<- text.git-status comment.git-status.help - meta.git-status
+;^^^^^^^^^^ comment.git-status.help - string
+#    r = refresh status
+;<- comment.git-status.help
+;    ^ comment.git-status.help string.other.git-status.help.key
+;     ^^ comment.git-status.help - string
+;        ^^^^^^^^^^^^^^ comment.git-status.help - string
+#    1-5 = jump to section
+;    ^^^ comment.git-status.help string.other.git-status.help.key
+#    n = next item, N = next section
+;    ^ comment.git-status.help string.other.git-status.help.key
+;                   ^ comment.git-status.help string.other.git-status.help.key
+;        ^^^^^^^^^^^ comment.git-status.help - string
+#    ctrl+shift+s = stage all unstaged and untracked files
+;    ^^^^^^^^^^^^ comment.git-status.help string.other.git-status.help.key
+#    backspace = discard file/section, shift+backspace = discard everything
+;    ^^^^^^^^^ comment.git-status.help string.other.git-status.help.key
+;                                      ^^^^^^^^^^^^^^^ comment.git-status.help string.other.git-status.help.key
+#    ctrl+shift+c = commit --amend (amend previous commit)
+;    ^^^^^^^^^^^^ comment.git-status.help string.other.git-status.help.key
+#    enter = open file
+;    ^^^^^ comment.git-status.help string.other.git-status.help.key
+#    backspace = discard stash
+;    ^^^^^^^^^ comment.git-status.help string.other.git-status.help.key

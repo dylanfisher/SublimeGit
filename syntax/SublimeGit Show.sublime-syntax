@@ -1,0 +1,26 @@
+%YAML 1.2
+---
+# Syntax for the *git-show* view built by sgit/show.py.
+name: SublimeGit Show
+scope: source.git-show
+version: 2
+hidden: true
+file_extensions:
+  - git-show
+
+contexts:
+  main:
+    - include: scope:source.git-diff
+    - match: '^commit (\w+)\n'
+      scope: source.git-show.commit
+      captures:
+        1: source.git-show.commit.sha
+    - match: '^Author: (.+) <(.+)>\n'
+      scope: source.git-show.author
+      captures:
+        1: source.git-show.author.name
+        2: source.git-show.author.email
+    - match: '^Date:   (.+)\n'
+      scope: source.git-show.date
+      captures:
+        1: source.git-show.date.date

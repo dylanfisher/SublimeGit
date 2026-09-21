@@ -21,7 +21,7 @@ GIT_DIFF_CACHED_TITLE_PREFIX = GIT_DIFF_CACHED_TITLE + ': '
 GIT_DIFF_CLEAN = "Nothing to stage (no difference between working tree and index)"
 GIT_DIFF_CLEAN_CACHED = "Nothing to unstage (no changes in index)"
 
-GIT_DIFF_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Diff.tmLanguage'
+GIT_DIFF_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Diff.sublime-syntax'
 
 GIT_DIFF_UNSTAGE_ERROR = "Cannot unstage hunks which have not been staged."
 GIT_DIFF_STAGE_ERROR = "Cannot stage hunks which are already staged."
@@ -52,7 +52,7 @@ class GitDiffCommand(WindowCommand, GitCmd):
         if not view:
             view = self.window.new_file()
             view.set_name(title)
-            view.set_syntax_file(GIT_DIFF_VIEW_SYNTAX)
+            view.assign_syntax(GIT_DIFF_VIEW_SYNTAX)
             view.set_scratch(True)
             view.set_read_only(True)
 

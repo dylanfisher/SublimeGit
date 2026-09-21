@@ -1,0 +1,14 @@
+%YAML 1.2
+---
+# Syntax for the TAG_EDITMSG view built by sgit/tag.py.
+name: SublimeGit Tag Message
+scope: text.git-tag
+version: 2
+hidden: true
+file_extensions:
+  - TAG_EDITMSG
+
+contexts:
+  main:
+    - match: '^\s*#(.*)'
+      scope: comment.line.number-sign.git-commit
