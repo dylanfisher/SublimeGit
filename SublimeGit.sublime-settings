@@ -96,8 +96,12 @@
      * Change behavior of the status bar message
      *
      * If set to "fancy", SublimeGit will show a message like
-     * "on <branch><dirty> in <repo>". If set to "simple"
-     * the status message will be "on <branch>".
+     * "On <branch><dirty> in <repo>[ with unpushed]", where <dirty>
+     * is "*" when there are staged, unstaged or unmerged changes
+     * (untracked files do not count) and " with unpushed" is shown
+     * when the branch is ahead of its upstream. If set to "simple"
+     * the status message will be "On <branch>". Nothing is shown
+     * on a detached HEAD.
      *
      * Set to false to completely disable the status bar (might
      * be necessary for performance reasons on huge projects).

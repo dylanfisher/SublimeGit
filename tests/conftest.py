@@ -28,6 +28,7 @@ sys.modules['sublime_plugin'] = sublime_plugin
 import sgit  # noqa: E402,F401  -- imports the whole plugin against the stubs
 from sgit.helpers import GitRepoHelper  # noqa: E402
 from sgit.blame import GitBlameCache  # noqa: E402
+from sgit.status import reset_status_bar_state  # noqa: E402
 
 GIT = shutil.which('git')
 requires_git = pytest.mark.skipif(GIT is None, reason='git not found on PATH')
@@ -38,6 +39,8 @@ def _reset_plugin_class_state():
     GitRepoHelper.windows.clear()
     GitBlameCache.commits.clear()
     GitBlameCache.lines.clear()
+    # Module-level status bar cache / token / in-flight bookkeeping.
+    reset_status_bar_state()
 
 
 @pytest.fixture(autouse=True)

@@ -2,6 +2,7 @@
 import os
 import logging
 import threading
+import time
 from functools import partial
 
 import sublime
@@ -542,45 +543,285 @@ class GitStatusEventListener(EventListener):
             view.run_command('git_status_refresh', {'goto': goto})
 
 
+# Status bar ---------------------------------------------------------------
+
+# How long (seconds) a computed status bar message stays valid for a repo.
+# Bursts of view events (activate + load, tab switching) within this window
+# reuse the cached message instead of spawning another git process.
+STATUS_BAR_CACHE_TTL = 1.0
+
+STATUS_BAR_KEY = 'git-status'
+
+
+def _apply_status_bar_message(view, msg):
+    """Show ``msg`` in ``view``'s status bar, or clear the entry when there is
+    nothing to show (detached HEAD, not a repository), so a stale "On main"
+    never lingers after the view moves out of a branch. Always goes through
+    ``sublime.set_timeout`` so it is safe to call from a worker thread."""
+    if msg is None:
+        sublime.set_timeout(partial(view.erase_status, STATUS_BAR_KEY), 0)
+    else:
+        sublime.set_timeout(partial(view.set_status, STATUS_BAR_KEY, msg), 0)
+
+
+def parse_porcelain_v2(text):
+    """Parse the output of ``git status --porcelain=v2 --branch``.
+
+    Pure function. Returns a dict with:
+
+    * ``branch``   -- branch name, or ``None`` when HEAD is detached
+    * ``oid``      -- HEAD commit, or ``None`` for an unborn branch (``(initial)``)
+    * ``upstream`` -- upstream ref name, or ``None`` when none is configured
+    * ``ahead`` / ``behind`` -- ints; 0 when there is no upstream
+    * ``staged`` / ``unstaged`` / ``unmerged`` -- bools
+
+    Untracked (``?``) and ignored (``!``) entries are ignored.
+    """
+    info = {
+        'branch': None,
+        'oid': None,
+        'upstream': None,
+        'ahead': 0,
+        'behind': 0,
+        'staged': False,
+        'unstaged': False,
+        'unmerged': False,
+    }
+
+    for line in text.splitlines():
+        if not line:
+            continue
+
+        if line.startswith('# '):
+            key, _, value = line[2:].partition(' ')
+            if key == 'branch.head':
+                info['branch'] = None if value == '(detached)' else value
+            elif key == 'branch.oid':
+                info['oid'] = None if value == '(initial)' else value
+            elif key == 'branch.upstream':
+                info['upstream'] = value or None
+            elif key == 'branch.ab':
+                for token in value.split():
+                    try:
+                        if token.startswith('+'):
+                            info['ahead'] = int(token[1:])
+                        elif token.startswith('-'):
+                            info['behind'] = int(token[1:])
+                    except ValueError:
+                        pass
+            continue
+
+        kind = line[0]
+        if kind in ('1', '2') and len(line) >= 4:
+            x, y = line[2], line[3]
+            if x != '.':
+                info['staged'] = True
+            if y != '.':
+                info['unstaged'] = True
+        elif kind == 'u':
+            info['unmerged'] = True
+        # '?' (untracked) and '!' (ignored) do not affect the status bar
+
+    return info
+
+
+def format_status_bar_message(info, kind, repo):
+    """Build the status bar text from a ``parse_porcelain_v2`` result.
+
+    Returns ``None`` when there is nothing to show (detached HEAD).
+    """
+    branch = info.get('branch')
+    if not branch:
+        return None
+
+    if kind == 'simple':
+        return 'On {branch}'.format(branch=branch)
+
+    dirty = info.get('staged') or info.get('unstaged') or info.get('unmerged')
+    return 'On {branch}{dirty} in {repo}{unpushed}'.format(
+        branch=branch,
+        dirty='*' if dirty else '',
+        repo=os.path.basename(repo),
+        unpushed=' with unpushed' if info.get('ahead', 0) > 0 else '',
+    )
+
+
+class _StatusBarState(object):
+    """Process-wide bookkeeping for status bar updates, guarded by ``lock``.
+
+    * ``cache``   -- ``{repo: (timestamp, kind, msg)}``; ``msg`` may be ``None``
+    * ``tokens``  -- ``{repo: int}``; bumped by ``invalidate()``. An updater
+                     captures the token when it is created and its result is
+                     discarded if the token has moved on by the time it lands.
+    * ``running`` -- ``{repo: updater}`` for the one in-flight updater per repo
+    * ``pending`` -- ``{repo: {view_id: view}}``: views that asked for a status
+                     while an updater was already running and will receive its
+                     result when it lands.
+    """
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.reset()
+
+    def reset(self):
+        self.cache = {}
+        self.tokens = {}
+        self.running = {}
+        self.pending = {}
+
+    def token(self, repo):
+        return self.tokens.get(repo, 0)
+
+    def invalidate(self, repo):
+        with self.lock:
+            self.tokens[repo] = self.tokens.get(repo, 0) + 1
+            self.cache.pop(repo, None)
+
+    def cached(self, repo, kind, now):
+        """Return ``(hit, msg)`` for a cache entry younger than the TTL."""
+        entry = self.cache.get(repo)
+        if entry is None:
+            return False, None
+        timestamp, cached_kind, msg = entry
+        if cached_kind != kind or now - timestamp >= STATUS_BAR_CACHE_TTL:
+            return False, None
+        return True, msg
+
+    def complete(self, updater, msg, timestamp, ok=True):
+        """Record an updater's result and release its repo slot.
+
+        Returns ``(apply_to, retry_for)``: the views to apply ``msg`` to, and
+        the views whose request must be re-run because the result is stale.
+
+        ``ok=False`` means the updater raised: the repo is released so later
+        requests can spawn again, but nothing is cached, applied or retried
+        (retrying would most likely fail the same way, in a loop).
+        """
+        with self.lock:
+            views = {updater.view.id(): updater.view}
+            if self.running.get(updater.repo) is updater:
+                del self.running[updater.repo]
+                views.update(self.pending.pop(updater.repo, {}))
+
+            if not ok:
+                return [], []
+
+            if self.tokens.get(updater.repo, 0) != updater.token:
+                return [], list(views.values())
+
+            self.cache[updater.repo] = (timestamp, updater.kind, msg)
+            return list(views.values()), []
+
+    def release(self, updater):
+        """Free the repo slot of an updater that never got to run."""
+        with self.lock:
+            if self.running.get(updater.repo) is updater:
+                del self.running[updater.repo]
+                self.pending.pop(updater.repo, None)
+
+
+_state = _StatusBarState()
+
+
+def reset_status_bar_state():
+    """Forget all cached messages, tokens and in-flight updaters (tests)."""
+    with _state.lock:
+        _state.reset()
+
+
+def invalidate_status_bar_cache(repo):
+    """Drop the cached message for ``repo`` and mark in-flight results stale."""
+    _state.invalidate(repo)
+
+
+def request_status_bar_update(bin, encoding, fallback, repo, kind, view):
+    """Ask for ``view``'s status bar to show the state of ``repo``.
+
+    Applies a fresh cached message immediately (via ``sublime.set_timeout``),
+    joins an updater that is already running for ``repo``, or spawns a new
+    one. Returns the spawned ``GitStatusBarUpdater`` or ``None``.
+    """
+    with _state.lock:
+        hit, msg = _state.cached(repo, kind, time.monotonic())
+        if hit:
+            updater = None
+        elif repo in _state.running:
+            _state.pending.setdefault(repo, {})[view.id()] = view
+            return None
+        else:
+            updater = GitStatusBarUpdater(bin, encoding, fallback, repo, kind, view)
+            _state.running[repo] = updater
+
+    if updater is None:
+        _apply_status_bar_message(view, msg)
+        return None
+
+    try:
+        updater.start()
+    except Exception:
+        # Thread creation failed; release the repo or every later request for
+        # it would be parked in ``pending`` behind an updater that never runs.
+        _state.release(updater)
+        logger.warning('could not start status bar updater for %s', repo, exc_info=True)
+        return None
+    return updater
+
+
 class GitStatusBarUpdater(threading.Thread, GitCmd):
+    """Run one ``git status`` off the UI thread and deliver the message.
+
+    The message is applied with ``view.set_status`` on the main thread via
+    ``sublime.set_timeout``. Nothing is scheduled when there is no message
+    (detached HEAD, not a repo, git failure).
+    """
     _lpop = False
 
-    def __init__(self, bin, encoding, fallback, repo, kind, view, *args, **kwargs):
+    STATUS_COMMAND = ['status', '--porcelain=v2', '--branch', '--untracked-files=no']
+
+    def __init__(self, bin, encoding, fallback, repo, kind, view, token=None, *args, **kwargs):
         super(GitStatusBarUpdater, self).__init__(*args, **kwargs)
+        self.daemon = True
         self.bin = bin
         self.encoding = encoding
         self.fallback = fallback
         self.repo = repo
         self.kind = kind
         self.view = view
+        self.token = _state.token(repo) if token is None else token
 
     def build_command(self, cmd):
         return self.bin + self.opts + [c for c in cmd if c]
 
+    def compute(self):
+        """Return the status bar message, or ``None`` if nothing should be shown."""
+        exit_code, stdout, _ = self.git(self.STATUS_COMMAND, cwd=self.repo, ignore_errors=True,
+                                        encoding=self.encoding, fallback=self.fallback)
+        if exit_code != 0:
+            return None
+        return format_status_bar_message(parse_porcelain_v2(stdout), self.kind, self.repo)
+
     def run(self):
-        branch = self.git_string(['symbolic-ref', '-q', 'HEAD'], cwd=self.repo,
-                                 ignore_errors=True, encoding=self.encoding, fallback=self.fallback)
-        if not branch:
-            return
+        timestamp = time.monotonic()
+        msg, ok = None, True
+        try:
+            msg = self.compute()
+        except Exception:
+            # Must not escape: an updater that dies without calling complete()
+            # leaves its repo marked as running forever, so every later request
+            # would be parked in ``pending`` and never applied -- a permanent
+            # status bar outage for that repo.
+            ok = False
+            logger.warning('status bar update failed for %s', self.repo, exc_info=True)
 
-        branch = branch[11:] if branch.startswith('refs/heads/') else branch
+        apply_to, retry_for = _state.complete(self, msg, timestamp, ok=ok)
 
-        if self.kind == 'simple':
-            msg = "On {branch}".format(branch=branch)
-        else:
-            self.git_exit_code(['update-index', '--refresh'], cwd=self.repo, encoding=self.encoding, fallback=self.fallback)
-            unpushed = self.git_exit_code(['diff', '--exit-code', '--quiet', '@{upstream}..'], cwd=self.repo, encoding=self.encoding, fallback=self.fallback)
-            staged = self.git_exit_code(['diff-index', '--quiet', '--cached', 'HEAD'], cwd=self.repo, encoding=self.encoding, fallback=self.fallback)
-            unstaged = self.git_exit_code(['diff-index', '--quiet', 'HEAD'], cwd=self.repo, encoding=self.encoding, fallback=self.fallback)
-            msg = 'On {branch}{dirty} in {repo}{unpushed}'.format(
-                branch=branch,
-                dirty='*' if (staged or unstaged) else '',
-                repo=os.path.basename(self.repo),
-                unpushed=' with unpushed' if unpushed == 1 else ''
-            )
+        for view in apply_to:
+            _apply_status_bar_message(view, msg)
 
-        sublime.set_timeout(partial(self.view.set_status, 'git-status', msg), 0)
-        # self.view.set_status('git-status', msg)
+        # The repo changed while we were running (a save came in); re-run for
+        # everybody who was waiting so they do not end up with a stale message.
+        for view in retry_for:
+            request_status_bar_update(self.bin, self.encoding, self.fallback, self.repo, self.kind, view)
 
 
 class GitStatusBarEventListener(EventListener, GitCmd):
@@ -596,7 +837,7 @@ class GitStatusBarEventListener(EventListener, GitCmd):
 
     def on_post_save(self, view):
         if sublime.version() < '3000':
-            self.set_status(view)
+            self.set_status(view, invalidate=True)
 
     def on_activated_async(self, view):
         self.set_status(view)
@@ -605,23 +846,28 @@ class GitStatusBarEventListener(EventListener, GitCmd):
         self.set_status(view)
 
     def on_post_save_async(self, view):
-        self.set_status(view)
+        self.set_status(view, invalidate=True)
 
-    def set_status(self, view):
+    def set_status(self, view, invalidate=False):
         kind = get_setting('git_status_bar', 'fancy')
         if kind not in ('fancy', 'simple'):
             return
 
         repo = self.get_repo_from_view(view)
         if not repo:
+            # e.g. switched from a repo file to one outside any repo
+            _apply_status_bar_message(view, None)
             return
+
+        if invalidate:
+            # a save changes dirtiness; never serve the pre-save message
+            invalidate_status_bar_cache(repo)
 
         bin = get_executable('git', self.bin)
         encoding = get_setting('encoding', 'utf-8')
         fallback = get_setting('fallback_encodings', [])
 
-        updater = GitStatusBarUpdater(bin, encoding, fallback, repo, kind, view)
-        updater.start()
+        request_status_bar_update(bin, encoding, fallback, repo, kind, view)
 
 
 class GitQuickStatusCommand(WindowCommand, GitCmd, GitStatusHelper):

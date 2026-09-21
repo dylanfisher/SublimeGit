@@ -24,6 +24,15 @@ Changes from upstream
   keeping it for the lifetime of the process.
 - Fixed `get_remote_names()` (it crashed calling `.append` on a set), so
   commands that list remote names work again.
+- The status bar message is computed with a single `git status --porcelain=v2
+  --branch` call instead of five git processes, is cached per repo for one
+  second, coalesces bursts of view events into one running update (results
+  that arrive after a save are discarded and re-run), and "with unpushed" now
+  means the branch is ahead of its upstream rather than "worktree differs from
+  upstream" (so a branch that is only behind is no longer flagged). A repo
+  without commits is no longer reported as dirty unless something is staged.
+  The status entry is cleared when a view leaves a branch (detached HEAD,
+  non-repo file) instead of showing stale text.
 
 The original documentation is at
 [sublimegit.readthedocs.io](http://sublimegit.readthedocs.io/en/latest/) and

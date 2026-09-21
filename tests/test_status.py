@@ -1,16 +1,21 @@
 # coding: utf-8
 """Behavioural tests for sgit/status.py against a real temporary git repo."""
 import os
+import time
 
 import pytest
 import sublime
 
 from conftest import requires_git, GIT
+import sgit.status
 from sgit.status import (GitStatusBarUpdater, GitStatusBuilder, GitStatusCommand,
                          GitQuickStatusCommand, GitStatusBarEventListener,
                          GitStatusMoveCmd, GitStatusRefreshCommand, GitStatusUnstageCommand,
                          GIT_STATUS_HELP, GIT_STATUS_VIEW_SETTINGS, GIT_STATUS_VIEW_SYNTAX,
-                         GIT_STATUS_VIEW_TITLE_PREFIX, GIT_WORKING_DIR_CLEAN)
+                         GIT_STATUS_VIEW_TITLE_PREFIX, GIT_WORKING_DIR_CLEAN,
+                         parse_porcelain_v2, format_status_bar_message,
+                         request_status_bar_update, invalidate_status_bar_cache,
+                         reset_status_bar_state)
 from sgit.diff import GitDiffRefreshCommand, GIT_DIFF_CLEAN, GIT_DIFF_CLEAN_CACHED
 from sgit.cmd import GitCmd
 from sgit.helpers import GitStatusHelper, GitStashHelper, GitLogHelper, GitBranchHelper, GitRemoteHelper
@@ -51,12 +56,14 @@ class TestStatusBarUpdater(object):
         tmp_repo.write('untracked.txt', 'x\n')
         assert status_bar(tmp_repo, sublime.View()) == 'On main in %s' % tmp_repo.name
 
-    def test_detached_head_sets_no_status(self, settings, tmp_repo):
+    def test_detached_head_clears_status(self, settings, tmp_repo):
+        """Detached HEAD has no message; any previous text is erased rather
+        than left behind (the pre-rewrite updater left it stale)."""
         tmp_repo.commit('a.txt', 'a\n')
         tmp_repo.git('checkout', '-q', '--detach')
         view = sublime.View()
+        view.set_status('git-status', 'On main in old')
         assert status_bar(tmp_repo, view) == ''
-        assert sublime.pending_timeouts() == []
         assert 'git-status' not in view._status
 
     def test_simple_kind_only_shows_branch(self, settings, tmp_repo):
@@ -91,37 +98,44 @@ class TestStatusBarUpdater(object):
         tmp_repo.git('push', '-q', '-u', 'origin', 'main')
         return bare
 
-    def test_ahead_but_identical_tree_is_not_reported_as_unpushed(self, settings, tmp_repo, tmp_path):
-        """Two unpushed commits whose net effect is nothing.
+    def test_ahead_with_identical_tree_is_unpushed(self, settings, tmp_repo, tmp_path):
+        """Two unpushed commits whose net effect on the tree is nothing.
 
-        The current check is `git diff --exit-code --quiet @{upstream}..`, which
-        compares *trees*, so it reports "clean" even though HEAD is 2 commits
-        ahead. Refactor (b) switches to an ahead-count, after which the expected
-        message becomes 'On main in <repo> with unpushed'.
+        "Unpushed" means HEAD has commits the upstream lacks (``# branch.ab
+        +N``), regardless of whether the trees differ. The old
+        ``git diff @{upstream}..`` check compared trees and missed this.
         """
         self._with_upstream(tmp_repo, tmp_path)
         tmp_repo.commit('b.txt', 'b\n')
         tmp_repo.git('rm', '-q', 'b.txt')
         tmp_repo.git('commit', '-q', '-m', 'revert b')
         assert tmp_repo.git('rev-list', '--count', '@{upstream}..HEAD') == '2'
-        assert status_bar(tmp_repo, sublime.View()) == 'On main in %s' % tmp_repo.name
+        assert status_bar(tmp_repo, sublime.View()) == 'On main in %s with unpushed' % tmp_repo.name
 
-    def test_behind_upstream_is_reported_as_unpushed(self, settings, tmp_repo, tmp_path):
-        """Nothing to push, but the tree differs from the upstream tree.
+    def test_behind_upstream_is_not_unpushed(self, settings, tmp_repo, tmp_path):
+        """Purely *behind* the upstream: nothing to push, so no suffix.
 
-        `git diff @{upstream}..` exits 1, so the current code says "with
-        unpushed" for a branch that is purely *behind*. Refactor (b)'s
-        ahead-count check should drop the suffix here.
+        The tree differs from the upstream tree, which fooled the old
+        ``git diff @{upstream}..`` check into saying "with unpushed". The
+        ahead-count from ``# branch.ab`` is 0 here.
         """
         self._with_upstream(tmp_repo, tmp_path)
         tmp_repo.commit('b.txt', 'b\n')
         tmp_repo.git('push', '-q', 'origin', 'main')
         tmp_repo.git('reset', '-q', '--hard', 'HEAD~1')
         assert tmp_repo.git('rev-list', '--count', '@{upstream}..HEAD') == '0'
+        assert status_bar(tmp_repo, sublime.View()) == 'On main in %s' % tmp_repo.name
+
+    def test_ahead_and_behind_is_unpushed(self, settings, tmp_repo, tmp_path):
+        self._with_upstream(tmp_repo, tmp_path)
+        tmp_repo.commit('b.txt', 'b\n')
+        tmp_repo.git('push', '-q', 'origin', 'main')
+        tmp_repo.git('reset', '-q', '--hard', 'HEAD~1')
+        tmp_repo.commit('c.txt', 'c\n')
         assert status_bar(tmp_repo, sublime.View()) == 'On main in %s with unpushed' % tmp_repo.name
 
     def test_no_upstream_configured_is_never_unpushed(self, settings, tmp_repo):
-        """`@{upstream}..` makes git exit 128, which is not 1, so no suffix."""
+        """No ``# branch.ab`` line without an upstream, so ahead is 0."""
         tmp_repo.commit('a.txt', 'a\n')
         tmp_repo.git('remote', 'add', 'origin', '/nowhere/at/all.git')
         assert status_bar(tmp_repo, sublime.View()) == 'On main in %s' % tmp_repo.name
@@ -133,9 +147,50 @@ class TestStatusBarUpdater(object):
         assert status_bar(tmp_repo, sublime.View(), kind='whatever') == 'On main in %s' % tmp_repo.name
 
     def test_repo_without_commits(self, settings, tmp_repo):
-        # unborn branch: symbolic-ref still resolves, but diff-index has no HEAD
-        # to compare against and exits non-zero, so the repo reads as dirty.
+        """Unborn branch (``# branch.oid (initial)``) reports its real state.
+
+        Previously this always showed ``main*`` because ``diff-index HEAD``
+        failed without a HEAD to compare against. Now an empty unborn repo is
+        clean, and staging a file makes it dirty.
+        """
+        assert status_bar(tmp_repo, sublime.View()) == 'On main in %s' % tmp_repo.name
+        tmp_repo.write('a.txt', 'a\n')
+        assert status_bar(tmp_repo, sublime.View()) == 'On main in %s' % tmp_repo.name
+        tmp_repo.git('add', 'a.txt')
         assert status_bar(tmp_repo, sublime.View()) == 'On main* in %s' % tmp_repo.name
+
+    def test_unmerged_paths_count_as_dirty(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'base\n')
+        tmp_repo.git('checkout', '-q', '-b', 'other')
+        tmp_repo.commit('a.txt', 'theirs\n')
+        tmp_repo.git('checkout', '-q', 'main')
+        tmp_repo.commit('a.txt', 'ours\n')
+        tmp_repo.git('merge', 'other', check=False)  # conflicts on a.txt
+        assert 'UU' in tmp_repo.git('status', '--porcelain')
+        assert status_bar(tmp_repo, sublime.View()) == 'On main* in %s' % tmp_repo.name
+
+    def test_git_failure_clears_status(self, settings, tmp_path):
+        """A non-zero exit (here: not a repository) has no message, so any
+        previous status text is erased instead of lingering."""
+        view = sublime.View()
+        view.set_status('git-status', 'On main in old')
+        updater = GitStatusBarUpdater([GIT], 'utf-8', [], str(tmp_path), 'fancy', view)
+        updater.run()
+        sublime.flush_timeouts()
+        assert 'git-status' not in view._status
+
+    def test_single_git_process(self, settings, tmp_repo, monkeypatch):
+        commands = []
+        original = GitStatusBarUpdater.git
+
+        def recording_git(self, cmd, *args, **kwargs):
+            commands.append(list(cmd))
+            return original(self, cmd, *args, **kwargs)
+
+        monkeypatch.setattr(GitStatusBarUpdater, 'git', recording_git)
+        tmp_repo.commit('a.txt', 'a\n')
+        status_bar(tmp_repo, sublime.View())
+        assert commands == [['status', '--porcelain=v2', '--branch', '--untracked-files=no']]
 
     def test_status_is_delivered_through_set_timeout(self, settings, tmp_repo):
         tmp_repo.commit('a.txt', 'a\n')
@@ -145,6 +200,314 @@ class TestStatusBarUpdater(object):
         assert view.get_status('git-status') == ''
         assert len(sublime.pending_timeouts()) == 1
         sublime.flush_timeouts()
+        assert view.get_status('git-status') == 'On main in %s' % tmp_repo.name
+
+
+PORCELAIN_HEADER = "# branch.oid 1111111111111111111111111111111111111111\n# branch.head main\n"
+
+
+class TestParsePorcelainV2(object):
+    """Table tests for the pure porcelain v2 parser (no git needed)."""
+
+    @pytest.mark.parametrize('text, expected', [
+        # clean, no upstream
+        (PORCELAIN_HEADER,
+         dict(branch='main', oid='1' * 40, upstream=None, ahead=0, behind=0,
+              staged=False, unstaged=False, unmerged=False)),
+        # staged only
+        (PORCELAIN_HEADER + "1 A. N... 000000 100644 100644 0000000 1111111 b.txt\n",
+         dict(branch='main', staged=True, unstaged=False, unmerged=False)),
+        # unstaged only
+        (PORCELAIN_HEADER + "1 .M N... 100644 100644 100644 1111111 1111111 a.txt\n",
+         dict(branch='main', staged=False, unstaged=True, unmerged=False)),
+        # both in one entry
+        (PORCELAIN_HEADER + "1 MM N... 100644 100644 100644 1111111 2222222 a.txt\n",
+         dict(staged=True, unstaged=True)),
+        # both in separate entries
+        (PORCELAIN_HEADER
+         + "1 M. N... 100644 100644 100644 1111111 2222222 a.txt\n"
+         + "1 .D N... 100644 100644 000000 1111111 1111111 c.txt\n",
+         dict(staged=True, unstaged=True)),
+        # rename entry (staged) with a tab separated original path
+        (PORCELAIN_HEADER + "2 R. N... 100644 100644 100644 1111111 1111111 R100 new.txt\told.txt\n",
+         dict(staged=True, unstaged=False)),
+        # unmerged entry
+        (PORCELAIN_HEADER + "u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 a.txt\n",
+         dict(staged=False, unstaged=False, unmerged=True)),
+        # untracked and ignored entries never count
+        (PORCELAIN_HEADER + "? loose.txt\n! build/\n",
+         dict(staged=False, unstaged=False, unmerged=False)),
+        # detached head
+        ("# branch.oid 1111111111111111111111111111111111111111\n# branch.head (detached)\n",
+         dict(branch=None, oid='1' * 40)),
+        # unborn branch
+        ("# branch.oid (initial)\n# branch.head main\n",
+         dict(branch='main', oid=None, staged=False)),
+        # ahead / behind
+        (PORCELAIN_HEADER + "# branch.upstream origin/main\n# branch.ab +2 -1\n",
+         dict(upstream='origin/main', ahead=2, behind=1)),
+        # upstream configured but in sync
+        (PORCELAIN_HEADER + "# branch.upstream origin/main\n# branch.ab +0 -0\n",
+         dict(upstream='origin/main', ahead=0, behind=0)),
+        # upstream configured but gone (no branch.ab line)
+        (PORCELAIN_HEADER + "# branch.upstream origin/main\n",
+         dict(upstream='origin/main', ahead=0, behind=0)),
+        # branch name containing spaces-free slashes
+        ("# branch.oid (initial)\n# branch.head feature/x-y\n", dict(branch='feature/x-y')),
+        # empty output (e.g. git failed silently)
+        ("", dict(branch=None, oid=None, ahead=0, staged=False, unstaged=False, unmerged=False)),
+    ])
+    def test_parse(self, text, expected):
+        info = parse_porcelain_v2(text)
+        for key, value in expected.items():
+            assert info[key] == value, key
+
+    def test_windows_line_endings(self):
+        info = parse_porcelain_v2(PORCELAIN_HEADER.replace('\n', '\r\n')
+                                  + "1 .M N... 100644 100644 100644 1111111 1111111 a.txt\r\n")
+        assert info['branch'] == 'main'
+        assert info['unstaged'] is True
+
+
+class TestFormatStatusBarMessage(object):
+
+    def test_fancy(self):
+        info = parse_porcelain_v2(PORCELAIN_HEADER)
+        assert format_status_bar_message(info, 'fancy', '/x/repo') == 'On main in repo'
+
+    def test_fancy_dirty_and_unpushed(self):
+        info = parse_porcelain_v2(PORCELAIN_HEADER + "# branch.ab +1 -3\n"
+                                  + "1 .M N... 100644 100644 100644 1111111 1111111 a.txt\n")
+        assert format_status_bar_message(info, 'fancy', '/x/repo') == 'On main* in repo with unpushed'
+
+    def test_unmerged_is_dirty(self):
+        info = parse_porcelain_v2(PORCELAIN_HEADER
+                                  + "u UU N... 100644 100644 100644 100644 1111111 2222222 3333333 a.txt\n")
+        assert format_status_bar_message(info, 'fancy', '/x/repo') == 'On main* in repo'
+
+    def test_behind_only_is_not_unpushed(self):
+        info = parse_porcelain_v2(PORCELAIN_HEADER + "# branch.ab +0 -3\n")
+        assert format_status_bar_message(info, 'fancy', '/x/repo') == 'On main in repo'
+
+    def test_simple_ignores_everything_but_the_branch(self):
+        info = parse_porcelain_v2(PORCELAIN_HEADER + "# branch.ab +1 -0\n"
+                                  + "1 MM N... 100644 100644 100644 1111111 2222222 a.txt\n")
+        assert format_status_bar_message(info, 'simple', '/x/repo') == 'On main'
+
+    def test_detached_is_none(self):
+        info = parse_porcelain_v2("# branch.oid 1111111\n# branch.head (detached)\n")
+        assert format_status_bar_message(info, 'fancy', '/x/repo') is None
+        assert format_status_bar_message(info, 'simple', '/x/repo') is None
+
+
+class TestStatusBarCacheAndDebounce(object):
+    """Cache hits, coalescing of concurrent requests and stale-result discard.
+
+    ``GitStatusBarUpdater.start`` is patched to a no-op so threads never
+    actually run; tests drive ``updater.run()`` by hand at the moment they
+    want the result to land, then ``flush()`` the main-thread callbacks.
+    """
+
+    @pytest.fixture
+    def spawned(self, monkeypatch):
+        updaters = []
+        monkeypatch.setattr(GitStatusBarUpdater, 'start', lambda self: updaters.append(self))
+        return updaters
+
+    def request(self, tmp_repo, view, kind='fancy'):
+        return request_status_bar_update([GIT], 'utf-8', [], tmp_repo.path, kind, view)
+
+    def test_cache_hit_within_ttl_applies_without_spawning(self, settings, tmp_repo, spawned, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        first = sublime.View()
+        updater = self.request(tmp_repo, first)
+        assert spawned == [updater]
+        updater.run()
+        flush()
+        assert first.get_status('git-status') == 'On main in %s' % tmp_repo.name
+
+        second = sublime.View()
+        assert self.request(tmp_repo, second) is None
+        assert spawned == [updater]  # nothing new
+        assert second.get_status('git-status') == ''  # still goes through set_timeout
+        flush()
+        assert second.get_status('git-status') == 'On main in %s' % tmp_repo.name
+
+    def test_cache_expires_after_ttl(self, settings, tmp_repo, spawned, flush, monkeypatch):
+        tmp_repo.commit('a.txt', 'a\n')
+        updater = self.request(tmp_repo, sublime.View())
+        updater.run()
+        flush()
+
+        monkeypatch.setattr(sgit.status, 'STATUS_BAR_CACHE_TTL', 0.0)
+        view = sublime.View()
+        second = self.request(tmp_repo, view)
+        assert second is not None and spawned == [updater, second]
+
+    def test_cache_is_per_kind(self, settings, tmp_repo, spawned, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        updater = self.request(tmp_repo, sublime.View(), kind='fancy')
+        updater.run()
+        flush()
+        view = sublime.View()
+        second = self.request(tmp_repo, view, kind='simple')
+        assert second is not None
+        second.run()
+        flush()
+        assert view.get_status('git-status') == 'On main'
+
+    def test_cached_no_status_result_does_not_respawn(self, settings, tmp_repo, spawned, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.git('checkout', '-q', '--detach')
+        updater = self.request(tmp_repo, sublime.View())
+        updater.run()
+        flush()
+        view = sublime.View()
+        assert self.request(tmp_repo, view) is None
+        assert len(spawned) == 1
+        flush()
+        assert 'git-status' not in view._status
+
+    def test_concurrent_request_for_same_repo_joins_the_running_updater(self, settings, tmp_repo, spawned, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        first, second = sublime.View(), sublime.View()
+        updater = self.request(tmp_repo, first)
+        assert self.request(tmp_repo, second) is None
+        assert self.request(tmp_repo, second) is None  # same view twice is fine
+        assert spawned == [updater]
+
+        updater.run()
+        flush()
+        expected = 'On main in %s' % tmp_repo.name
+        assert first.get_status('git-status') == expected
+        assert second.get_status('git-status') == expected
+
+    def test_different_repos_run_independently(self, settings, tmp_repo, tmp_path, spawned):
+        tmp_repo.commit('a.txt', 'a\n')
+        other_path = os.path.realpath(str(tmp_path / 'other'))
+        os.makedirs(other_path)
+        other = type(tmp_repo)(other_path)
+        other.git('init', '-q', '-b', 'main')
+        a = self.request(tmp_repo, sublime.View())
+        b = self.request(other, sublime.View())
+        assert a is not None and b is not None and a is not b
+
+    def test_invalidation_bumps_token_and_drops_cache(self, settings, tmp_repo, spawned, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        updater = self.request(tmp_repo, sublime.View())
+        updater.run()
+        flush()
+        invalidate_status_bar_cache(tmp_repo.path)
+        second = self.request(tmp_repo, sublime.View())
+        assert second is not None
+        assert second.token == updater.token + 1
+
+    def test_stale_result_is_discarded_and_rerun(self, settings, tmp_repo, spawned, flush, monkeypatch):
+        """A result computed before an invalidation must never be shown."""
+        tmp_repo.commit('a.txt', 'a\n')
+        view = sublime.View()
+        updater = self.request(tmp_repo, view)
+        monkeypatch.setattr(updater, 'compute', lambda: 'STALE')
+
+        invalidate_status_bar_cache(tmp_repo.path)  # e.g. a save mid-run
+        waiting = sublime.View()
+        assert self.request(tmp_repo, waiting) is None  # coalesced onto the running one
+
+        updater.run()
+        flush()
+        assert view.get_status('git-status') == ''
+        assert waiting.get_status('git-status') == ''
+
+        # ... and a fresh updater was spawned for everyone who was waiting
+        assert len(spawned) == 2
+        fresh = spawned[-1]
+        assert fresh is not updater
+        fresh.run()
+        flush()
+        expected = 'On main in %s' % tmp_repo.name
+        assert view.get_status('git-status') == expected
+        assert waiting.get_status('git-status') == expected
+        assert len(spawned) == 2
+
+    def test_updater_that_raises_releases_the_repo(self, settings, tmp_repo, spawned, flush, monkeypatch):
+        """An exception in compute() must not wedge the repo forever.
+
+        If ``running[repo]`` were left behind, every later request would be
+        parked in ``pending`` and never applied: a permanent outage.
+        """
+        tmp_repo.commit('a.txt', 'a\n')
+        view = sublime.View()
+        updater = self.request(tmp_repo, view)
+
+        def boom():
+            raise RuntimeError('git blew up')
+
+        monkeypatch.setattr(updater, 'compute', boom)
+
+        waiting = sublime.View()
+        assert self.request(tmp_repo, waiting) is None  # coalesced onto it
+
+        updater.run()  # must not raise
+        flush()
+        assert 'git-status' not in view._status
+        assert 'git-status' not in waiting._status
+        assert tmp_repo.path not in sgit.status._state.running
+        assert tmp_repo.path not in sgit.status._state.pending
+        assert tmp_repo.path not in sgit.status._state.cache
+
+        # a later request for the same repo still spawns and works
+        fresh = self.request(tmp_repo, view)
+        assert fresh is not None and fresh is not updater
+        fresh.run()
+        flush()
+        assert view.get_status('git-status') == 'On main in %s' % tmp_repo.name
+
+    def test_failure_to_start_releases_the_repo(self, settings, tmp_repo, monkeypatch, flush):
+        """Same guarantee when the thread cannot even be started."""
+        tmp_repo.commit('a.txt', 'a\n')
+
+        def no_start(self):
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(GitStatusBarUpdater, 'start', no_start)
+        assert self.request(tmp_repo, sublime.View()) is None
+        assert tmp_repo.path not in sgit.status._state.running
+
+        monkeypatch.undo()
+        view = sublime.View()
+        updater = self.request(tmp_repo, view)
+        assert updater is not None
+        updater.join(5)
+        flush()
+        assert view.get_status('git-status') == 'On main in %s' % tmp_repo.name
+
+    def test_reset_forgets_everything(self, settings, tmp_repo, spawned, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        updater = self.request(tmp_repo, sublime.View())
+        updater.run()
+        flush()
+        reset_status_bar_state()
+        assert self.request(tmp_repo, sublime.View()) is not None
+
+    def test_run_actually_uses_a_thread(self, settings, tmp_repo, flush, monkeypatch):
+        """The unpatched path: git runs on the updater thread, set_status via set_timeout."""
+        import threading
+        tmp_repo.commit('a.txt', 'a\n')
+        view = sublime.View()
+        seen = {}
+        original = GitStatusBarUpdater.compute
+
+        def compute(self):
+            seen['thread'] = threading.current_thread()
+            return original(self)
+
+        monkeypatch.setattr(GitStatusBarUpdater, 'compute', compute)
+        updater = self.request(tmp_repo, view)
+        updater.join(5)
+        assert not updater.is_alive()
+        assert seen['thread'] is updater
+        assert view.get_status('git-status') == ''
+        flush()
         assert view.get_status('git-status') == 'On main in %s' % tmp_repo.name
 
 
@@ -565,18 +928,56 @@ class TestStatusBarEventListener(object):
         tmp_repo.commit('a.txt', 'a\n')
         return sublime.View(file_name=os.path.join(tmp_repo.path, 'a.txt'))
 
+    def test_view_outside_any_repo_clears_status(self, settings, tmp_path, spawned):
+        """Switching to a file outside a repo erases the old repo's message."""
+        view = sublime.View(file_name=str(tmp_path / 'loose.txt'))
+        view.set_status('git-status', 'On main in old')
+        GitStatusBarEventListener().on_activated_async(view)
+        sublime.flush_timeouts()
+        assert spawned == []
+        assert 'git-status' not in view._status
+
     def test_async_events_spawn_an_updater(self, settings, tmp_repo, spawned):
         view = self.view_in_repo(tmp_repo)
         listener = GitStatusBarEventListener()
-        listener.on_activated_async(view)
-        listener.on_load_async(view)
-        listener.on_post_save_async(view)
+        for event in (listener.on_activated_async, listener.on_load_async, listener.on_post_save_async):
+            reset_status_bar_state()  # nothing running, nothing cached
+            event(view)
 
         assert len(spawned) == 3
         assert all(c['started'] for c in spawned)
         assert spawned[0]['repo'] == tmp_repo.path
         assert spawned[0]['kind'] == 'fancy'
         assert spawned[0]['view'] is view
+
+    def test_burst_of_events_spawns_one_updater(self, settings, tmp_repo, spawned):
+        """activate + load for the same repo coalesce while an updater runs."""
+        view = self.view_in_repo(tmp_repo)
+        listener = GitStatusBarEventListener()
+        listener.on_activated_async(view)
+        listener.on_load_async(view)
+        listener.on_activated_async(sublime.View(file_name=os.path.join(tmp_repo.path, 'a.txt')))
+        assert len(spawned) == 1
+        assert sgit.status._state.running[tmp_repo.path] is not None
+        assert len(sgit.status._state.pending[tmp_repo.path]) == 2
+
+    def test_post_save_invalidates_the_cache(self, settings, tmp_repo, spawned, monkeypatch):
+        view = self.view_in_repo(tmp_repo)
+        listener = GitStatusBarEventListener()
+        listener.on_activated_async(view)
+        assert len(spawned) == 1
+
+        # pretend the running updater finished and populated the cache
+        reset_status_bar_state()
+        sgit.status._state.cache[tmp_repo.path] = (time.monotonic(), 'fancy', 'On main in %s' % tmp_repo.name)
+        token_before = sgit.status._state.token(tmp_repo.path)
+        listener.on_activated_async(view)
+        assert len(spawned) == 1  # served from cache
+
+        listener.on_post_save_async(view)
+        assert len(spawned) == 2  # cache dropped, fresh updater
+        assert tmp_repo.path not in sgit.status._state.cache
+        assert sgit.status._state.token(tmp_repo.path) == token_before + 1
 
     def test_sync_events_do_nothing_on_st3_plus(self, settings, tmp_repo, spawned):
         view = self.view_in_repo(tmp_repo)
