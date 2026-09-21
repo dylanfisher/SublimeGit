@@ -13,7 +13,7 @@ from .custom import GitCustomCommand, GitCustomOutputCommand
 
 from .diff import (GitDiffCommand, GitDiffCachedCommand, GitDiffRefreshCommand, GitDiffMoveCommand,
                    GitDiffChangeHunkSizeCommand, GitDiffStageUnstageHunkCommand, GitDiffCurrentFileCommand,
-                   GitDiffCachedCurrentFileCommand, GitDiffEventListener)
+                   GitDiffCachedCurrentFileCommand, GitDiffWriteCommand, GitDiffEventListener)
 
 from .show import GitShowCommand, GitShowRefreshCommand
 
@@ -31,7 +31,7 @@ from .remote import (GitPushCurrentBranchCommand, GitPullCurrentBranchCommand,
                      GitFetchCommand, GitPullCommand, GitPushCommand,
                      GitRemoteCommand, GitRemoteAddCommand)
 
-from .status import (GitStatusCommand, GitStatusRefreshCommand, GitQuickStatusCommand,
+from .status import (GitStatusCommand, GitStatusRefreshCommand, GitStatusWriteCommand, GitQuickStatusCommand,
                      GitStatusMoveCommand, GitStatusStageCommand,
                      GitStatusUnstageCommand, GitStatusDiscardCommand,
                      GitStatusOpenFileCommand, GitStatusDiffCommand,

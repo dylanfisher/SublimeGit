@@ -1,5 +1,6 @@
 # coding: utf-8
 """Behavioural tests for sgit/status.py against a real temporary git repo."""
+import json
 import os
 import time
 
@@ -10,13 +11,15 @@ from conftest import requires_git, GIT
 import sgit.status
 from sgit.status import (GitStatusBarUpdater, GitStatusBuilder, GitStatusCommand,
                          GitQuickStatusCommand, GitStatusBarEventListener,
-                         GitStatusMoveCmd, GitStatusRefreshCommand, GitStatusUnstageCommand,
+                         GitStatusMoveCmd, GitStatusRefreshCommand, GitStatusWriteCommand,
+                         GitStatusEventListener, GitStatusUnstageCommand,
                          GIT_STATUS_HELP, GIT_STATUS_VIEW_SETTINGS, GIT_STATUS_VIEW_SYNTAX,
                          GIT_STATUS_VIEW_TITLE_PREFIX, GIT_WORKING_DIR_CLEAN,
                          parse_porcelain_v2, format_status_bar_message,
                          request_status_bar_update, invalidate_status_bar_cache,
-                         reset_status_bar_state)
-from sgit.diff import GitDiffRefreshCommand, GIT_DIFF_CLEAN, GIT_DIFF_CLEAN_CACHED
+                         reset_status_bar_state, reset_view_refresh_state)
+from sgit.diff import (GitDiffRefreshCommand, GitDiffWriteCommand, GitDiffEventListener,
+                       GIT_DIFF_CLEAN, GIT_DIFF_CLEAN_CACHED)
 from sgit.cmd import GitCmd
 from sgit.helpers import GitStatusHelper, GitStashHelper, GitLogHelper, GitBranchHelper, GitRemoteHelper
 
@@ -32,6 +35,51 @@ def status_bar(repo, view, kind='fancy', flush=sublime.flush_timeouts):
     updater.run()  # run synchronously instead of via Thread.start()
     flush()
     return view.get_status('git-status')
+
+
+# The apply phase of the async view refreshes is a hidden TextCommand that the
+# stub's ``view.run_command`` only records; this executes what was recorded.
+WRITE_COMMANDS = {
+    'git_status_write': GitStatusWriteCommand,
+    'git_diff_write': GitDiffWriteCommand,
+}
+
+
+def run_write_commands(view):
+    """Execute (and drop) the recorded ``git_*_write`` commands of ``view``.
+    Other recorded commands are left in place. Returns the number executed."""
+    ran = 0
+    for name, args in list(view.commands):
+        cls = WRITE_COMMANDS.get(name)
+        if cls is None:
+            continue
+        view.commands.remove((name, args))
+        cls(view).run(None, **(args or {}))
+        ran += 1
+    return ran
+
+
+@pytest.fixture
+def inline_threads(monkeypatch):
+    """Make ``run_in_thread`` run the worker body synchronously."""
+    monkeypatch.setattr(sgit.status, 'run_in_thread', lambda fn: fn())
+
+
+@pytest.fixture
+def deferred_threads(monkeypatch):
+    """Capture worker bodies instead of running them, so a test controls
+    exactly when each gather happens. Returns the list of captured bodies."""
+    workers = []
+    monkeypatch.setattr(sgit.status, 'run_in_thread', lambda fn: workers.append(fn))
+    return workers
+
+
+def refresh(cmd, flush, **args):
+    """Drive a two-phase refresh to completion: request, gather inline,
+    flush the main-thread apply, execute the recorded write command."""
+    cmd.run(None, **args)
+    flush()
+    return run_write_commands(cmd.view)
 
 
 class TestStatusBarUpdater(object):
@@ -713,8 +761,11 @@ class TestParseGoto(object):
 class TestStatusRefreshCommand(object):
     """Pins what ``git_status_refresh`` puts in the view.
 
-    Refactor (c) moves the git work off the UI thread; the resulting buffer
-    contents and read-only flag must not change.
+    The git work runs in a worker thread (``inline_threads`` runs it
+    synchronously here); the buffer is written by the hidden
+    ``git_status_write`` command on the main thread. The resulting buffer
+    contents, read-only flag and caret placement are the same as when the
+    refresh was synchronous.
     """
 
     @pytest.fixture(autouse=True)
@@ -725,39 +776,316 @@ class TestStatusRefreshCommand(object):
         return sublime.View(settings={'git_view': 'status', 'git_repo': repo.path},
                             content=content)
 
-    def test_replaces_buffer_with_built_status(self, settings, tmp_repo):
+    def test_replaces_buffer_with_built_status(self, settings, tmp_repo, inline_threads, flush):
         tmp_repo.commit('a.txt', 'a\n', message='first')
         tmp_repo.write('a.txt', 'changed\n')
         view = self.status_view(tmp_repo)
 
-        GitStatusRefreshCommand(view).run(None, goto='point:0')
+        refresh(GitStatusRefreshCommand(view), flush, goto='point:0')
 
         assert view.substr(sublime.Region(0, view.size())) == \
             GitStatusBuilder().build_status(tmp_repo.path)
         assert view.is_read_only()
         assert list(view.sel()) == [sublime.Region(0, 0)]
 
-    def test_default_goto_lands_on_the_clean_line(self, settings, tmp_repo):
+    def test_default_goto_lands_on_the_clean_line(self, settings, tmp_repo, inline_threads, flush):
         tmp_repo.commit('a.txt', 'a\n')
         view = self.status_view(tmp_repo)
 
-        GitStatusRefreshCommand(view).run(None)
+        refresh(GitStatusRefreshCommand(view), flush)
 
         text = view.substr(sublime.Region(0, view.size()))
         assert GIT_WORKING_DIR_CLEAN in text
         point = view.sel()[0].begin()
         assert view.substr(view.line(point)) == GIT_WORKING_DIR_CLEAN
 
-    def test_does_nothing_for_a_non_status_view(self, settings, tmp_repo):
+    def test_buffer_is_untouched_until_the_apply_phase_runs(self, settings, tmp_repo, inline_threads, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+
+        GitStatusRefreshCommand(view).run(None)
+        # the gather ran inline, the apply is parked in set_timeout
+        assert view.substr(sublime.Region(0, view.size())) == 'stale contents'
+        assert view.commands == []
+
+        flush()
+        assert [name for name, _ in view.commands] == ['git_status_write']
+        assert view.substr(sublime.Region(0, view.size())) == 'stale contents'
+
+        run_write_commands(view)
+        assert GIT_WORKING_DIR_CLEAN in view.substr(sublime.Region(0, view.size()))
+
+    def test_does_nothing_for_a_non_status_view(self, settings, tmp_repo, inline_threads, flush):
         view = sublime.View(settings={'git_view': 'diff', 'git_repo': tmp_repo.path},
                             content='untouched')
-        GitStatusRefreshCommand(view).run(None)
+        assert refresh(GitStatusRefreshCommand(view), flush) == 0
         assert view.substr(sublime.Region(0, view.size())) == 'untouched'
 
-    def test_does_nothing_without_a_repo(self, settings, tmp_path):
+    def test_does_nothing_without_a_repo(self, settings, tmp_path, inline_threads, flush):
         view = sublime.View(settings={'git_view': 'status'}, content='untouched')
-        GitStatusRefreshCommand(view).run(None)
+        assert refresh(GitStatusRefreshCommand(view), flush) == 0
         assert view.substr(sublime.Region(0, view.size())) == 'untouched'
+
+    def test_viewport_is_restored_for_a_point_goto(self, settings, tmp_repo, inline_threads, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        view.set_viewport_position((0.0, 123.0), False)
+
+        refresh(GitStatusRefreshCommand(view), flush, goto='point:0')
+
+        # move_to_point() alone would have scrolled a row < 10 to the top
+        assert view.viewport_position() == (0.0, 123.0)
+
+    def test_viewport_is_not_restored_for_other_gotos(self, settings, tmp_repo, inline_threads, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        view.set_viewport_position((0.0, 123.0), False)
+
+        refresh(GitStatusRefreshCommand(view), flush, goto='file:1')
+
+        assert view.viewport_position() == (0.0, 0.0)
+
+    def test_on_activated_refreshes_at_the_caret(self, settings, tmp_repo):
+        view = self.status_view(tmp_repo)
+        view.sel().add(sublime.Region(7, 7))
+        GitStatusEventListener().on_activated(view)
+        assert view.commands == [('git_status_refresh', {'goto': 'point:7'})]
+
+    def test_run_actually_uses_a_thread(self, settings, tmp_repo, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+
+        cmd = GitStatusRefreshCommand(view)
+        cmd.run(None)
+        deadline = time.time() + 10
+        while not sublime.pending_timeouts() and time.time() < deadline:
+            time.sleep(0.01)
+        assert sublime.pending_timeouts(), 'the worker never scheduled the apply phase'
+
+        flush()
+        run_write_commands(view)
+        assert GIT_WORKING_DIR_CLEAN in view.substr(sublime.Region(0, view.size()))
+        assert view.id() not in sgit.status._refresh_state.running
+
+
+class TestStatusRefreshCoalescing(object):
+    """Rapid refreshes of one view must not apply out of order.
+
+    ``deferred_threads`` captures worker bodies; a test runs them by hand at
+    the moment it wants the gather to happen, then ``flush()`` runs the
+    main-thread apply.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_help(self, settings):
+        settings.set('git_show_status_help', False)
+
+    @pytest.fixture
+    def gathers(self, monkeypatch):
+        calls = []
+        original = GitStatusRefreshCommand.gather
+
+        def gather(self, request):
+            calls.append(request)
+            return original(self, request)
+        monkeypatch.setattr(GitStatusRefreshCommand, 'gather', gather)
+        return calls
+
+    def status_view(self, repo):
+        return sublime.View(settings={'git_view': 'status', 'git_repo': repo.path},
+                            content='stale contents')
+
+    def test_second_request_while_running_queues_exactly_one_rerun(self, settings, tmp_repo, deferred_threads, gathers, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        cmd.run(None, goto='file:1')
+        cmd.run(None, goto='point:0')
+        cmd.run(None, goto='point:1')
+        assert len(deferred_threads) == 1  # the others are queued, not spawned
+
+        # the first worker lands: its result is stale, so nothing is written,
+        # and one rerun is spawned for the *latest* request
+        deferred_threads[0]()
+        flush()
+        assert view.commands == []
+        assert len(deferred_threads) == 2
+
+        deferred_threads[1]()
+        flush()
+        assert len(deferred_threads) == 2
+        assert len(gathers) == 2
+        assert [name for name, _ in view.commands] == ['git_status_write']
+        assert view.commands[0][1]['goto'] == 'point:1'
+
+        run_write_commands(view)
+        assert GIT_WORKING_DIR_CLEAN in view.substr(sublime.Region(0, view.size()))
+        assert view.id() not in sgit.status._refresh_state.running
+
+    def test_result_of_a_stale_generation_is_discarded(self, settings, tmp_repo, deferred_threads, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        cmd.run(None)
+        generation = sgit.status._refresh_state.generation[view.id()]
+        # something moved the generation on while the worker was busy
+        cmd.apply(generation - 1, {'repo': tmp_repo.path, 'goto': None, 'viewport': [0.0, 0.0]},
+                  'would be stale', True)
+        assert view.commands == []
+
+        cmd.apply(generation, {'repo': tmp_repo.path, 'goto': None, 'viewport': [0.0, 0.0]},
+                  'fresh', True)
+        assert [name for name, _ in view.commands] == ['git_status_write']
+
+    def test_sequential_requests_each_spawn_a_worker(self, settings, tmp_repo, inline_threads, gathers, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        assert refresh(cmd, flush) == 1
+        assert refresh(cmd, flush) == 1
+        assert len(gathers) == 2
+
+    def test_pre_close_forgets_the_view_and_drops_the_in_flight_result(self, settings, tmp_repo, deferred_threads, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        cmd.run(None)
+        cmd.run(None)  # queued rerun
+        state = sgit.status._refresh_state
+        assert view.id() in state.running and view.id() in state.rerun
+
+        GitStatusEventListener().on_pre_close(view)
+        assert view.id() not in state.generation
+        assert view.id() not in state.running
+        assert view.id() not in state.rerun
+
+        deferred_threads[0]()
+        flush()
+        assert view.commands == []
+        assert len(deferred_threads) == 1  # no rerun for a closed view
+
+    def test_gather_that_raises_releases_the_view(self, settings, tmp_repo, inline_threads, monkeypatch, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        def boom(self, request):
+            raise RuntimeError('git exploded')
+        monkeypatch.setattr(GitStatusRefreshCommand, 'gather', boom)
+        cmd.run(None)
+        flush()
+        assert view.commands == []
+        assert view.id() not in sgit.status._refresh_state.running
+
+        monkeypatch.undo()
+        monkeypatch.setattr(sgit.status, 'run_in_thread', lambda fn: fn())
+        assert refresh(cmd, flush) == 1
+
+    def test_queued_rerun_survives_a_failed_gather(self, settings, tmp_repo, inline_threads, monkeypatch, flush):
+        """A rerun queued behind a failing worker is a newer, distinct request
+        and is still run once the failure lands (it cannot loop: a rerun only
+        exists because a new request arrived)."""
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+        calls = []
+        real_gather = GitStatusRefreshCommand.gather
+
+        def flaky(self, request):
+            calls.append(request)
+            if len(calls) == 1:
+                raise RuntimeError('git exploded once')
+            return real_gather(self, request)
+
+        pending = []
+        monkeypatch.setattr(sgit.status, 'run_in_thread', lambda fn: pending.append(fn))
+        monkeypatch.setattr(GitStatusRefreshCommand, 'gather', flaky)
+        cmd.run(None)          # A: in flight
+        cmd.run(None)          # B: queued behind A
+        pending.pop(0)()       # A gathers and fails
+        flush()                # A lands: discarded, B must spawn
+        assert len(pending) == 1
+        pending.pop(0)()       # B gathers successfully
+        flush()
+        assert len(calls) == 2
+        assert [c[0] for c in view.commands] == ['git_status_write']
+        assert view.id() not in sgit.status._refresh_state.running
+
+    def test_failure_to_start_the_thread_releases_the_view(self, settings, tmp_repo, monkeypatch, flush):
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        def cannot_start(fn):
+            raise RuntimeError("can't start new thread")
+        monkeypatch.setattr(sgit.status, 'run_in_thread', cannot_start)
+        cmd.run(None)
+        assert view.id() not in sgit.status._refresh_state.running
+
+        monkeypatch.setattr(sgit.status, 'run_in_thread', lambda fn: fn())
+        assert refresh(cmd, flush) == 1
+
+    def test_reset_forgets_everything(self, settings, tmp_repo, deferred_threads):
+        view = self.status_view(tmp_repo)
+        GitStatusRefreshCommand(view).run(None)
+        reset_view_refresh_state()
+        state = sgit.status._refresh_state
+        assert state.generation == {} and state.running == set() and state.rerun == {}
+
+    def test_a_view_closed_mid_flight_is_not_written_to(self, settings, tmp_repo, deferred_threads, flush):
+        """The tab can go away between the gather and the apply. Sublime makes
+        every call on a closed view a no-op, but do not even try."""
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        cmd.run(None)
+        view.close()  # no on_pre_close: the bookkeeping is still there
+
+        deferred_threads[0]()
+        flush()
+        assert view.commands == []
+        assert view.substr(sublime.Region(0, view.size())) == 'stale contents'
+        # and the view is released, not wedged as running forever
+        assert view.id() not in sgit.status._refresh_state.running
+
+    def test_a_deliver_that_raises_releases_the_view(self, settings, tmp_repo, inline_threads, monkeypatch, flush):
+        """An exception in the apply phase must not leave the view marked as
+        running, or every later refresh of it would queue behind a worker that
+        has already died."""
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        cmd = GitStatusRefreshCommand(view)
+
+        def boom(self, request, result):
+            raise RuntimeError('run_command exploded')
+        monkeypatch.setattr(GitStatusRefreshCommand, 'deliver', boom)
+        cmd.run(None)
+        flush()
+        assert view.id() not in sgit.status._refresh_state.running
+
+        monkeypatch.undo()
+        monkeypatch.setattr(sgit.status, 'run_in_thread', lambda fn: fn())
+        assert refresh(cmd, flush) == 1
+
+    def test_write_command_args_are_json_serializable(self, settings, tmp_repo, inline_threads, flush):
+        """Sublime only passes str/int/float/bool/list/dict/None through
+        run_command -- a tuple viewport or a Region would not survive."""
+        tmp_repo.commit('a.txt', 'a\n')
+        view = self.status_view(tmp_repo)
+        view.set_viewport_position((0.0, 42.0), False)
+
+        GitStatusRefreshCommand(view).run(None, goto='point:0')
+        flush()
+
+        name, args = view.commands[0]
+        assert name == 'git_status_write'
+        assert json.loads(json.dumps(args)) == args
+        assert args['viewport'] == [0.0, 42.0]
 
 
 class TestStatusViewCreation(object):
@@ -800,7 +1128,11 @@ class TestStatusViewCreation(object):
 
 
 class TestDiffRefreshCommand(object):
-    """Pins what ``git_diff_refresh`` puts in the view (refactor (c))."""
+    """Pins what ``git_diff_refresh`` puts in the view.
+
+    Same two-phase shape as the status refresh: ``git diff`` runs in a worker
+    (inline here), ``git_diff_write`` writes the buffer on the main thread.
+    """
 
     def diff_view(self, repo, cached=False, content='stale'):
         return sublime.View(settings={'git_view': 'diff-cached' if cached else 'diff',
@@ -809,12 +1141,12 @@ class TestDiffRefreshCommand(object):
                                       'git_diff_cached': cached},
                             content=content)
 
-    def test_writes_worktree_diff(self, settings, tmp_repo):
+    def test_writes_worktree_diff(self, settings, tmp_repo, inline_threads, flush):
         tmp_repo.commit('a.txt', 'one\n')
         tmp_repo.write('a.txt', 'two\n')
         view = self.diff_view(tmp_repo)
 
-        GitDiffRefreshCommand(view).run(None)
+        refresh(GitDiffRefreshCommand(view), flush)
 
         text = view.substr(sublime.Region(0, view.size()))
         assert text.startswith('diff --git a/a.txt b/a.txt')
@@ -822,34 +1154,127 @@ class TestDiffRefreshCommand(object):
         assert view.settings().get('git_diff_clean') is False
         assert view.is_read_only()
 
-    def test_clean_worktree_writes_placeholder(self, settings, tmp_repo):
+    def test_clean_worktree_writes_placeholder(self, settings, tmp_repo, inline_threads, flush):
         tmp_repo.commit('a.txt', 'one\n')
         view = self.diff_view(tmp_repo)
 
-        GitDiffRefreshCommand(view).run(None)
+        refresh(GitDiffRefreshCommand(view), flush)
 
         assert view.substr(sublime.Region(0, view.size())) == GIT_DIFF_CLEAN
         assert view.settings().get('git_diff_clean') is True
 
-    def test_clean_index_writes_cached_placeholder(self, settings, tmp_repo):
+    def test_clean_index_writes_cached_placeholder(self, settings, tmp_repo, inline_threads, flush):
         tmp_repo.commit('a.txt', 'one\n')
         view = self.diff_view(tmp_repo, cached=True)
 
-        GitDiffRefreshCommand(view).run(None, cached=True)
+        refresh(GitDiffRefreshCommand(view), flush, cached=True)
 
         assert view.substr(sublime.Region(0, view.size())) == GIT_DIFF_CLEAN_CACHED
         assert view.settings().get('git_diff_clean') is True
 
-    def test_unified_setting_is_honoured(self, settings, tmp_repo):
+    def test_unified_setting_is_honoured(self, settings, tmp_repo, inline_threads, flush):
         tmp_repo.commit('a.txt', ''.join('%s\n' % i for i in range(20)))
         tmp_repo.write('a.txt', ''.join('%s\n' % (i if i != 10 else 'x') for i in range(20)))
         view = self.diff_view(tmp_repo)
         view.settings().set('git_diff_unified', 1)
 
-        GitDiffRefreshCommand(view).run(None)
+        refresh(GitDiffRefreshCommand(view), flush)
 
         text = view.substr(sublime.Region(0, view.size()))
         assert '@@ -10,3 +10,3 @@' in text
+
+    def test_buffer_is_untouched_until_the_apply_phase_runs(self, settings, tmp_repo, inline_threads, flush):
+        tmp_repo.commit('a.txt', 'one\n')
+        view = self.diff_view(tmp_repo)
+
+        GitDiffRefreshCommand(view).run(None)
+        assert view.substr(sublime.Region(0, view.size())) == 'stale'
+        flush()
+        assert [name for name, _ in view.commands] == ['git_diff_write']
+        run_write_commands(view)
+        assert view.substr(sublime.Region(0, view.size())) == GIT_DIFF_CLEAN
+
+    def test_run_move_is_forwarded_to_the_write(self, settings, tmp_repo, inline_threads, flush):
+        tmp_repo.commit('a.txt', 'one\n')
+        tmp_repo.write('a.txt', 'two\n')
+        view = self.diff_view(tmp_repo)
+
+        refresh(GitDiffRefreshCommand(view), flush, run_move=True)
+
+        assert view.commands == [('git_diff_move', None)]
+
+    def test_caret_row_and_column_survive_the_refresh(self, settings, tmp_repo, inline_threads, flush):
+        tmp_repo.commit('a.txt', 'one\n')
+        tmp_repo.write('a.txt', 'two\n')
+        view = self.diff_view(tmp_repo, content='line0\nline1\nline2\n')
+        view.sel().add(sublime.Region(8, 8))  # row 1, col 2
+
+        refresh(GitDiffRefreshCommand(view), flush)
+
+        assert view.rowcol(view.sel()[0].begin()) == (1, 2)
+
+    def test_does_nothing_without_a_diff_path(self, settings, tmp_repo, inline_threads, flush):
+        view = sublime.View(settings={'git_view': 'diff', 'git_repo': tmp_repo.path},
+                            content='untouched')
+        assert refresh(GitDiffRefreshCommand(view), flush) == 0
+        assert view.substr(sublime.Region(0, view.size())) == 'untouched'
+
+    def test_second_request_while_running_queues_exactly_one_rerun(self, settings, tmp_repo, deferred_threads, flush):
+        tmp_repo.commit('a.txt', 'one\n')
+        view = self.diff_view(tmp_repo)
+        cmd = GitDiffRefreshCommand(view)
+
+        cmd.run(None)
+        cmd.run(None)
+        cmd.run(None)
+        assert len(deferred_threads) == 1
+
+        deferred_threads[0]()
+        flush()
+        assert view.commands == []  # stale, discarded
+        assert len(deferred_threads) == 2
+
+        deferred_threads[1]()
+        flush()
+        assert len(deferred_threads) == 2
+        assert [name for name, _ in view.commands] == ['git_diff_write']
+
+    def test_pre_close_forgets_the_view(self, settings, tmp_repo, deferred_threads, flush):
+        tmp_repo.commit('a.txt', 'one\n')
+        view = self.diff_view(tmp_repo)
+        GitDiffRefreshCommand(view).run(None)
+        assert view.id() in sgit.status._refresh_state.running
+
+        GitDiffEventListener().on_pre_close(view)
+        assert view.id() not in sgit.status._refresh_state.running
+
+        deferred_threads[0]()
+        flush()
+        assert view.commands == []
+
+    def test_write_command_args_are_json_serializable(self, settings, tmp_repo, inline_threads, flush):
+        tmp_repo.commit('a.txt', 'one\n')
+        tmp_repo.write('a.txt', 'two\n')
+        view = self.diff_view(tmp_repo)
+
+        GitDiffRefreshCommand(view).run(None, run_move=True)
+        flush()
+
+        name, args = view.commands[0]
+        assert name == 'git_diff_write'
+        assert json.loads(json.dumps(args)) == args
+
+    def test_a_view_closed_mid_flight_is_not_written_to(self, settings, tmp_repo, deferred_threads, flush):
+        tmp_repo.commit('a.txt', 'one\n')
+        view = self.diff_view(tmp_repo)
+        GitDiffRefreshCommand(view).run(None)
+        view.close()
+
+        deferred_threads[0]()
+        flush()
+        assert view.commands == []
+        assert view.substr(sublime.Region(0, view.size())) == 'stale'
+        assert view.id() not in sgit.status._refresh_state.running
 
 
 class TestQuickStatusCommand(object):

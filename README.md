@@ -33,6 +33,13 @@ Changes from upstream
   without commits is no longer reported as dirty unless something is staged.
   The status entry is cleared when a view leaves a branch (detached HEAD,
   non-repo file) instead of showing stale text.
+- The status view and diff view refreshes run their git commands in a worker
+  thread instead of blocking the UI: `git_status_refresh` / `git_diff_refresh`
+  gather the text off the main thread and hand it to the hidden
+  `git_status_write` / `git_diff_write` commands to write the buffer and place
+  the caret. Refreshes are coalesced per view (a request that arrives while one
+  is running makes that result stale and queues exactly one more run), and a
+  refresh on focus restores the scroll position so the view does not jump.
 
 The original documentation is at
 [sublimegit.readthedocs.io](http://sublimegit.readthedocs.io/en/latest/) and

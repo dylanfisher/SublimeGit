@@ -472,6 +472,168 @@ class GitStatusMoveCmd(GitStatusTextCmd):
                     self.move_to_region(self.view.line(stashes[-1]))
 
 
+# Async view refresh ------------------------------------------------------
+#
+# The status and diff views are refreshed in two phases: a *gather* phase
+# that runs git in a worker thread and returns plain text, and an *apply*
+# phase on the main thread that writes the buffer and places the caret. The
+# apply phase needs an ``edit`` object, so it is a hidden TextCommand
+# (``git_status_write`` / ``git_diff_write``) invoked via ``view.run_command``.
+
+
+def run_in_thread(fn):
+    """Run ``fn`` in a daemon thread. Tests monkeypatch this to run inline."""
+    thread = threading.Thread(target=fn)
+    thread.daemon = True
+    thread.start()
+    return thread
+
+
+class _ViewRefreshState(object):
+    """Process-wide bookkeeping for in-flight view refreshes, guarded by ``lock``.
+
+    * ``generation`` -- ``{view_id: int}``; bumped by every request. A worker
+                        captures the generation when it starts and its result
+                        is dropped if the generation moved on before it lands.
+    * ``running``    -- ``{view_id}``: views with a worker in flight.
+    * ``rerun``      -- ``{view_id: (generation, request)}``: the latest request
+                        that arrived while a worker was running. Exactly one
+                        more worker runs for it once the current one lands.
+    """
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.reset()
+
+    def reset(self):
+        self.generation = {}
+        self.running = set()
+        self.rerun = {}
+
+    def begin(self, view_id, request):
+        """Register a request. Returns the generation to run with, or ``None``
+        when a worker is already running (the request is queued as a rerun
+        and the running worker's result becomes stale)."""
+        with self.lock:
+            generation = self.generation.get(view_id, 0) + 1
+            self.generation[view_id] = generation
+            if view_id in self.running:
+                self.rerun[view_id] = (generation, request)
+                return None
+            self.running.add(view_id)
+            return generation
+
+    def is_current(self, view_id, generation):
+        with self.lock:
+            return self.generation.get(view_id) == generation
+
+    def finish(self, view_id, ok=True):
+        """Mark the running worker as landed.
+
+        Returns ``(generation, request)`` of a queued rerun, in which case the
+        view stays marked as running and the caller must spawn it; otherwise
+        ``None`` and the view is released. A queued rerun is honoured even
+        when this worker failed (``ok=False``): it is a distinct, newer request
+        (so it cannot loop), and the failure may have been transient.
+        """
+        with self.lock:
+            queued = self.rerun.pop(view_id, None)
+            if view_id not in self.running:
+                return None
+            if queued is not None:
+                return queued
+            self.running.discard(view_id)
+            return None
+
+    def forget(self, view_id):
+        with self.lock:
+            self.generation.pop(view_id, None)
+            self.running.discard(view_id)
+            self.rerun.pop(view_id, None)
+
+
+_refresh_state = _ViewRefreshState()
+
+
+def reset_view_refresh_state():
+    """Forget all view refresh generations, in-flight workers and reruns (tests)."""
+    with _refresh_state.lock:
+        _refresh_state.reset()
+
+
+def forget_view_refresh(view_id):
+    """Drop the refresh bookkeeping of a view that is being closed."""
+    _refresh_state.forget(view_id)
+
+
+class GitViewRefreshCmd(object):
+    """Mixin for a TextCommand that refreshes its view in two phases.
+
+    Subclasses implement ``gather(request) -> result`` (worker thread; git
+    only, no view mutation) and ``deliver(request, result)`` (main thread;
+    runs the hidden write command). ``request`` is a plain dict captured on
+    the main thread when the refresh was asked for.
+    """
+
+    def request_refresh(self, request):
+        """Start a refresh, or queue it behind the one already running.
+        Returns ``True`` when a worker was spawned."""
+        generation = _refresh_state.begin(self.view.id(), request)
+        if generation is None:
+            return False
+        self.spawn(generation, request)
+        return True
+
+    def spawn(self, generation, request):
+        try:
+            run_in_thread(partial(self.work, generation, request))
+        except Exception:
+            # Thread creation failed; release the view or every later request
+            # for it would be queued behind a worker that never runs.
+            _refresh_state.finish(self.view.id(), ok=False)
+            logger.warning('could not start refresh for view %s', self.view.id(), exc_info=True)
+
+    def work(self, generation, request):
+        """Worker body: gather, then hand the result to the main thread."""
+        result, ok = None, True
+        try:
+            result = self.gather(request)
+        except Exception:
+            # Must not escape: a worker that dies without calling finish()
+            # leaves its view marked as running forever.
+            ok = False
+            logger.warning('refresh failed for view %s', self.view.id(), exc_info=True)
+        sublime.set_timeout(partial(self.apply, generation, request, result, ok), 0)
+
+    def apply(self, generation, request, result, ok):
+        """Main thread: write the result unless it is stale, then run the
+        rerun that was queued while the worker was busy, if any."""
+        view_id = self.view.id()
+        try:
+            if ok and self.view_is_valid() and _refresh_state.is_current(view_id, generation):
+                self.deliver(request, result)
+        except Exception:
+            # finish() below must run whatever happens: an apply that escapes
+            # would leave the view marked as running forever.
+            ok = False
+            logger.warning('could not apply refresh for view %s', view_id, exc_info=True)
+        rerun = _refresh_state.finish(view_id, ok=ok)
+        if rerun is not None:
+            self.spawn(*rerun)
+
+    def view_is_valid(self):
+        """False when the view was closed between the request and the apply.
+        ``is_valid`` is ST3+; treat its absence as valid."""
+        is_valid = getattr(self.view, 'is_valid', None)
+        return True if is_valid is None else bool(is_valid())
+
+    def gather(self, request):
+        raise NotImplementedError
+
+    def deliver(self, request, result):
+        raise NotImplementedError
+
+
 class GitStatusCommand(WindowCommand, GitStatusBuilder):
     """
     Documentation coming soon.
@@ -505,7 +667,9 @@ class GitStatusCommand(WindowCommand, GitStatusBuilder):
             view.run_command('git_status_refresh')
 
 
-class GitStatusRefreshCommand(TextCommand, GitStatusBuilder, GitStatusMoveCmd):
+class GitStatusRefreshCommand(TextCommand, GitViewRefreshCmd, GitStatusBuilder):
+    """Refresh the status view: ``build_status`` runs in a worker thread, the
+    buffer is written by ``git_status_write`` on the main thread."""
     _lpop = False
 
     def is_visible(self):
@@ -519,18 +683,52 @@ class GitStatusRefreshCommand(TextCommand, GitStatusBuilder, GitStatusMoveCmd):
         if not repo:
             return
 
-        status = self.build_status(repo)
+        self.request_refresh({
+            'repo': repo,
+            'goto': goto,
+            'viewport': list(self.view.viewport_position()),
+        })
+
+    def gather(self, request):
+        return self.build_status(request['repo'])
+
+    def deliver(self, request, status):
         if not status:
             return
+        self.view.run_command('git_status_write', {
+            'content': status,
+            'goto': request['goto'],
+            'viewport': request['viewport'],
+        })
 
+
+class GitStatusWriteCommand(TextCommand, GitStatusMoveCmd):
+    """Apply phase of ``git_status_refresh``: replace the buffer and place the
+    caret. Hidden; only invoked from the main thread by the refresh."""
+
+    def is_visible(self):
+        return False
+
+    def run(self, edit, content='', goto=None, viewport=None):
         self.view.set_read_only(False)
-        self.view.replace(edit, sublime.Region(0, self.view.size()), status)
+        self.view.replace(edit, sublime.Region(0, self.view.size()), content)
         self.view.set_read_only(True)
 
         if goto:
             self.goto(goto)
         else:
             self.goto(GOTO_DEFAULT)
+
+        # A refresh on focus keeps the caret where it was; also keep the
+        # scroll position so the view does not jump. move_to_point() has
+        # already scrolled (it snaps anything in the first 10 rows to the
+        # top), so undo that -- but the new buffer may be shorter or shaped
+        # differently, so make sure the caret did not end up off-screen:
+        # show() is a no-op when the point is already visible.
+        if viewport is not None and goto and goto.startswith('point:'):
+            self.view.set_viewport_position(tuple(viewport), False)
+            if self.view.sel():
+                self.view.show(self.view.sel()[0].begin(), False)
 
 
 class GitStatusEventListener(EventListener):
@@ -541,6 +739,9 @@ class GitStatusEventListener(EventListener):
             if view.sel():
                 goto = "point:%s" % view.sel()[0].begin()
             view.run_command('git_status_refresh', {'goto': goto})
+
+    def on_pre_close(self, view):
+        forget_view_refresh(view.id())
 
 
 # Status bar ---------------------------------------------------------------

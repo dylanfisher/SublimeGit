@@ -208,9 +208,19 @@ class View(object):
         self._syntax = None
         self._buf = content
         self.viewport = (0.0, 0.0)
+        self._valid = True
 
     def id(self):
         return self._id
+
+    def is_valid(self):
+        """False once the view is closed. Real Sublime turns every method on a
+        closed view into a no-op; the plugin checks this before writing."""
+        return self._valid
+
+    # test helper: pretend the user closed the tab
+    def close(self):
+        self._valid = False
 
     def file_name(self):
         return self._file_name

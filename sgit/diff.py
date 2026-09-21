@@ -8,6 +8,7 @@ from sublime_plugin import WindowCommand, TextCommand, EventListener
 from .util import find_view_by_settings, get_setting
 from .cmd import GitCmd
 from .helpers import GitDiffHelper, GitErrorHelper, GitStatusHelper
+from .status import GitViewRefreshCmd, forget_view_refresh
 
 
 RE_DIFF_HEAD = re.compile(r'(---|\+\+\+){3} (a|b)/(dev/null)?')
@@ -218,7 +219,9 @@ class GitDiffTextCmd(GitCmd, GitDiffHelper):
         return "".join(patch)
 
 
-class GitDiffRefreshCommand(TextCommand, GitDiffTextCmd):
+class GitDiffRefreshCommand(TextCommand, GitViewRefreshCmd, GitDiffTextCmd):
+    """Refresh the diff view: ``git diff`` runs in a worker thread, the
+    buffer is written by ``git_diff_write`` on the main thread."""
 
     def is_visible(self):
         return False
@@ -235,15 +238,46 @@ class GitDiffRefreshCommand(TextCommand, GitDiffTextCmd):
         point = self.view.sel()[0].begin() if self.view.sel() else 0
         row, col = self.view.rowcol(point)
 
-        diff = self.get_diff(repo, path, cached, unified=unified)
+        self.request_refresh({
+            'repo': repo,
+            'path': path,
+            'cached': cached,
+            'unified': unified,
+            'run_move': run_move,
+            'row': row,
+            'col': col,
+        })
+
+    def gather(self, request):
+        return self.get_diff(request['repo'], request['path'], request['cached'],
+                             unified=request['unified'])
+
+    def deliver(self, request, diff):
         clean = False
         if not diff:
-            diff = GIT_DIFF_CLEAN_CACHED if cached else GIT_DIFF_CLEAN
+            diff = GIT_DIFF_CLEAN_CACHED if request['cached'] else GIT_DIFF_CLEAN
             clean = True
 
+        self.view.run_command('git_diff_write', {
+            'content': diff,
+            'clean': clean,
+            'run_move': request['run_move'],
+            'row': request['row'],
+            'col': request['col'],
+        })
+
+
+class GitDiffWriteCommand(TextCommand, GitDiffTextCmd):
+    """Apply phase of ``git_diff_refresh``: replace the buffer and place the
+    caret. Hidden; only invoked from the main thread by the refresh."""
+
+    def is_visible(self):
+        return False
+
+    def run(self, edit, content='', clean=False, run_move=False, row=0, col=0):
         self.view.settings().set('git_diff_clean', clean)
         self.view.set_read_only(False)
-        self.view.replace(edit, sublime.Region(0, self.view.size()), diff)
+        self.view.replace(edit, sublime.Region(0, self.view.size()), content)
         self.view.set_read_only(True)
 
         if run_move:
@@ -260,6 +294,9 @@ class GitDiffEventListener(EventListener):
     def on_activated(self, view):
         if view.settings().get('git_view') in ('diff', 'diff-cached') and get_setting('git_update_diff_on_focus', True):
             view.run_command('git_diff_refresh')
+
+    def on_pre_close(self, view):
+        forget_view_refresh(view.id())
 
 
 class GitDiffChangeHunkSizeCommand(TextCommand):
