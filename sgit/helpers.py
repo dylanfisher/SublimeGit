@@ -218,11 +218,70 @@ class GitRepoHelper(object):
         return GitRepoHelper.windows.get(window.id())
 
 
+# Remotes that are listed ahead of the rest, in this order. Everything else
+# follows alphabetically.
+PREFERRED_REMOTES = ('origin', 'upstream')
+
+
+def remote_sort_key(name):
+    try:
+        return (PREFERRED_REMOTES.index(name), '')
+    except ValueError:
+        return (len(PREFERRED_REMOTES), name)
+
+
+def sort_remote_names(names):
+    """Sort remote names so ``origin`` and ``upstream`` come first."""
+    return sorted(set(names), key=remote_sort_key)
+
+
 class GitBranchHelper(object):
 
     def get_current_branch(self, repo):
         branch = self.git_string(['symbolic-ref', '-q', 'HEAD'], cwd=repo)
         return branch[11:] if branch.startswith('refs/heads/') else branch
+
+    BRANCH_DETAILS_FORMAT = '%(refname)%09%(HEAD)%09%(upstream:short)%09%(subject)'
+
+    def get_branch_details(self, repo, remotes=False):
+        """Return ``[(name, current, upstream, subject), ...]`` for every local
+        (or, with ``remotes=True``, remote-tracking) branch from one git call.
+        Symbolic refs such as ``origin/HEAD`` are skipped."""
+        prefix = 'refs/remotes/' if remotes else 'refs/heads/'
+        lines = self.git_lines(['for-each-ref', '--format=%s' % self.BRANCH_DETAILS_FORMAT, prefix], cwd=repo)
+        branches = []
+        for line in lines:
+            parts = line.split('\t', 3)
+            if len(parts) != 4:
+                continue
+            refname, head, upstream, subject = parts
+            name = refname[len(prefix):]
+            if remotes and name.endswith('/HEAD'):
+                continue
+            branches.append((name, head == '*', upstream, subject))
+        return branches
+
+    def format_quick_branch_details(self, branches, annotation=''):
+        choices = []
+        for name, current, upstream, subject in branches:
+            details = format_details(subject, ('tracks %s' % upstream) if upstream else '')
+            choices.append(sublime.QuickPanelItem(name, details=details, annotation=annotation, kind=KIND_BRANCH))
+        return choices
+
+    def get_git_paths(self, repo, *names):
+        """Resolve ``names`` inside the git dir (``git rev-parse --git-path``)
+        to absolute paths with one call."""
+        cmd = ['rev-parse']
+        for name in names:
+            cmd.extend(['--git-path', name])
+        paths = self.git_lines(cmd, cwd=repo)
+        return [p if os.path.isabs(p) else os.path.join(repo, p) for p in paths]
+
+    def get_in_progress(self, repo):
+        """Return ``(merging, rebasing)`` for the repo, from one git call."""
+        merge_head, rebase_merge, rebase_apply = self.get_git_paths(repo, 'MERGE_HEAD', 'rebase-merge', 'rebase-apply')
+        return (os.path.exists(merge_head),
+                os.path.isdir(rebase_merge) or os.path.isdir(rebase_apply))
 
     def get_branches(self, repo, remotes=False):
         lines = self.git_lines(['branch', '--list', '--no-color', '--remotes' if remotes else None], cwd=repo)
@@ -248,7 +307,7 @@ class GitRemoteHelper(GitBranchHelper):
             name, right = r.split('\t', 1)
             url, action = right.rsplit(' ', 1)
             names.add(name)
-        return sorted(names)
+        return sort_remote_names(names)
 
     def format_quick_remotes(self, remotes):
         data = {}
@@ -257,7 +316,8 @@ class GitRemoteHelper(GitBranchHelper):
             url, action = right.rsplit(' ', 1)
             data.setdefault(name, {})[action] = "%s %s" % (url, action)
         choices = []
-        for remote, urls in data.items():
+        for remote in sort_remote_names(data):
+            urls = data[remote]
             choices.append(sublime.QuickPanelItem(
                 remote,
                 details=format_details(urls.get('(fetch)'), urls.get('(push)')),

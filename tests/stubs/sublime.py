@@ -533,6 +533,17 @@ class Window(object):
     def show_quick_panel(self, items, on_done, flags=0, selected_index=-1, on_highlighted=None):
         self.quick_panel = (items, on_done)
 
+    def show_input_panel(self, caption, initial_text, on_done, on_change, on_cancel):
+        self.input_panel = (caption, initial_text, on_done, on_change, on_cancel)
+
+    def get_output_panel(self, name):
+        if not hasattr(self, 'panels'):
+            self.panels = {}
+        return self.panels.setdefault(name, View(window=self))
+
+    def create_output_panel(self, name, unlisted=False):
+        return self.get_output_panel(name)
+
     def __repr__(self):
         return 'Window(id=%r)' % self._id
 

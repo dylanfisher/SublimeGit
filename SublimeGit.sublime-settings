@@ -150,6 +150,23 @@
      *
      */
      "git_merge_flags": [],
+    /*
+     * Extra flags to use when running Git: Rebase
+     *
+     * Works like git_merge_flags. For example, to stash and restore
+     * local changes around the rebase automatically:
+     *
+     *  "git_rebase_flags": ["--autostash"]
+     */
+     "git_rebase_flags": [],
+    /*
+     * Prune on fetch and pull
+     *
+     * If set to true, Git: Fetch, Git: Pull and Git: Pull Current Branch
+     * pass --prune, so remote-tracking branches that were deleted on the
+     * remote are removed locally instead of piling up.
+     */
+     "git_fetch_prune": true,
 
     /*
      * Warning when opening multiple tabs from a blame view.

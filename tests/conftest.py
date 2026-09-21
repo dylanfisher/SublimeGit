@@ -29,6 +29,7 @@ import sgit  # noqa: E402,F401  -- imports the whole plugin against the stubs
 from sgit.helpers import GitRepoHelper  # noqa: E402
 from sgit.blame import GitBlameCache  # noqa: E402
 from sgit.status import reset_status_bar_state, reset_view_refresh_state  # noqa: E402
+from sgit.cmd import reset_repo_locks  # noqa: E402
 
 GIT = shutil.which('git')
 requires_git = pytest.mark.skipif(GIT is None, reason='git not found on PATH')
@@ -43,6 +44,7 @@ def _reset_plugin_class_state():
     reset_status_bar_state()
     # Module-level per-view generation / in-flight table of the async view refreshes.
     reset_view_refresh_state()
+    reset_repo_locks()
 
 
 @pytest.fixture(autouse=True)

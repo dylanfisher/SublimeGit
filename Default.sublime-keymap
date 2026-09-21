@@ -1,4 +1,14 @@
 [
+    /*** GIT LOG ***/
+
+    // Refresh
+    { "keys": ["r"], "command": "git_log_refresh",
+        "context": [{ "key": "selector", "operator": "equal", "operand": "source.git-show" },
+                    { "key": "setting.git_view", "operator": "equal", "operand": "log" }]
+    },
+
+    /*** END GIT LOG ***/
+
     /*** GIT STATUS ***/
     // Refresh
     { "keys": ["r"], "command": "git_status_refresh",

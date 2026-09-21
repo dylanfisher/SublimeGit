@@ -19,6 +19,31 @@ class SublimeGitException(Exception):
     pass
 
 
+# Git commands are serialized per repository. Two git processes touching the
+# same repo at once (a status refresh on a worker thread and a stage from the
+# UI thread, say) race for ``.git/index.lock`` and one of them fails with
+# "Unable to create '.../index.lock': File exists". Holding a lock keyed by
+# the working directory for the lifetime of each process removes that race.
+# Commands run without a ``cwd`` share one fallback lock.
+_repo_locks = {}
+_repo_locks_guard = threading.Lock()
+
+
+def repo_lock(cwd):
+    key = os.path.realpath(cwd) if cwd else None
+    with _repo_locks_guard:
+        lock = _repo_locks.get(key)
+        if lock is None:
+            lock = _repo_locks[key] = threading.Lock()
+        return lock
+
+
+def reset_repo_locks():
+    """Test hook: drop every per-repo lock."""
+    with _repo_locks_guard:
+        _repo_locks.clear()
+
+
 class Cmd(object):
     started_at = datetime.today()
     last_popup_at = None
@@ -93,14 +118,15 @@ class Cmd(object):
             if stdin and hasattr(stdin, 'encode'):
                 stdin = stdin.encode(encoding)
 
-            proc = subprocess.Popen(command,
-                                    stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    startupinfo=self.startupinfo(),
-                                    cwd=cwd or None,
-                                    env=environment)
-            stdout, stderr = proc.communicate(stdin)
+            with repo_lock(cwd):
+                proc = subprocess.Popen(command,
+                                        stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        startupinfo=self.startupinfo(),
+                                        cwd=cwd or None,
+                                        env=environment)
+                stdout, stderr = proc.communicate(stdin)
 
             logger.debug("out: (%s) %s", proc.returncode, [stdout[:100]])
 
@@ -127,20 +153,21 @@ class Cmd(object):
             try:
                 logger.debug('async-cmd: %s', cmd)
 
-                proc = subprocess.Popen(cmd,
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT,
-                                        startupinfo=self.startupinfo(),
-                                        cwd=cwd or None,
-                                        env=environment)
+                with repo_lock(cwd):
+                    proc = subprocess.Popen(cmd,
+                                            stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT,
+                                            startupinfo=self.startupinfo(),
+                                            cwd=cwd or None,
+                                            env=environment)
 
-                for line in iter(proc.stdout.readline, b''):
-                    logger.debug('async-out: %s', line.strip())
-                    line = self.decode(line, encoding, fallback)
-                    if callable(on_data):
-                        sublime.set_timeout(partial(on_data, line), 0)
+                    for line in iter(proc.stdout.readline, b''):
+                        logger.debug('async-out: %s', line.strip())
+                        line = self.decode(line, encoding, fallback)
+                        if callable(on_data):
+                            sublime.set_timeout(partial(on_data, line), 0)
 
-                proc.wait()
+                    proc.wait()
                 logger.debug('async-exit: %s', proc.returncode)
                 if proc.returncode == 0:
                     if callable(on_complete):

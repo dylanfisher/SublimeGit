@@ -300,8 +300,8 @@ class TestRemoteHelper(object):
         assert r.get_remotes('/repo') == REMOTE_LINES
         assert r.calls == [('lines', ['remote', '-v'], {'cwd': '/repo'})]
 
-    def test_get_remote_names_sorted_unique(self):
-        assert Remotes().get_remote_names(REMOTE_LINES) == ['fetchonly', 'origin', 'upstream']
+    def test_get_remote_names_unique_origin_and_upstream_first(self):
+        assert Remotes().get_remote_names(REMOTE_LINES) == ['origin', 'upstream', 'fetchonly']
 
     def test_format_quick_remotes(self):
         items = Remotes().format_quick_remotes(REMOTE_LINES)

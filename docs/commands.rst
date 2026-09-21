@@ -42,6 +42,7 @@ Committing
 .. autowindowcmd:: sgit.commit.GitQuickCommitCurrentFileCommand
 .. autowindowcmd:: sgit.commit.GitCommitCommand
 .. autowindowcmd:: sgit.commit.GitCommitAmendCommand
+.. autowindowcmd:: sgit.commit.GitUndoCommitCommand
 
 
 Logs
@@ -49,6 +50,7 @@ Logs
 .. autowindowcmd:: sgit.log.GitLogCommand
 .. autowindowcmd:: sgit.log.GitQuickLogCommand
 .. autowindowcmd:: sgit.log.GitQuickLogCurrentFileCommand
+.. autowindowcmd:: sgit.log.GitLogCurrentFileCommand
 .. autowindowcmd:: sgit.show.GitShowCommand
 
 .. _branching-merging:
@@ -59,6 +61,11 @@ Branching and Merging
 .. autowindowcmd:: sgit.checkout.GitCheckoutCommitCommand
 .. autowindowcmd:: sgit.checkout.GitCheckoutNewBranchCommand
 .. autowindowcmd:: sgit.merge.GitMergeCommand
+.. autowindowcmd:: sgit.merge.GitMergeAbortCommand
+.. autowindowcmd:: sgit.merge.GitRebaseCommand
+.. autowindowcmd:: sgit.merge.GitRebaseAbortCommand
+.. autowindowcmd:: sgit.branch.GitDeleteBranchCommand
+.. autowindowcmd:: sgit.branch.GitDeleteMergedBranchesCommand
 
 
 Working with Remotes

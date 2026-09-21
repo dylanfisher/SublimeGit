@@ -20,7 +20,8 @@ from .help import GitHelpCommand, GitVersionCommand
 
 from .gc import GitGarbageCollectCommand
 
-from .log import GitLogCommand, GitQuickLogCommand, GitQuickLogCurrentFileCommand
+from .log import (GitLogCommand, GitQuickLogCommand, GitQuickLogCurrentFileCommand,
+                  GitLogCurrentFileCommand, GitLogRefreshCommand)
 
 from .blame import (GitBlameCommand, GitBlameRefreshCommand, GitBlameShowCommand,
                     GitBlameBlameCommand)
@@ -42,7 +43,7 @@ from .add import GitQuickAddCommand, GitAddCurrentFileCommand
 
 from .commit import (GitCommitCommand, GitCommitAmendCommand, GitCommitTemplateCommand,
                      GitCommitPerformCommand, GitQuickCommitCommand, GitQuickCommitCurrentFileCommand,
-                     GitCommitSaveCommand)
+                     GitCommitSaveCommand, GitUndoCommitCommand)
 from .commit import GitCommitEventListener
 
 from .stash import (GitStashCommand, GitSnapshotCommand,
@@ -54,7 +55,9 @@ from .checkout import (GitCheckoutBranchCommand, GitCheckoutCommitCommand,
                        GitCheckoutNewBranchCommand, GitCheckoutCurrentFileCommand,
                        GitCheckoutTagCommand, GitCheckoutRemoteBranchCommand)
 
-from .merge import GitMergeCommand
+from .merge import GitMergeCommand, GitMergeAbortCommand, GitRebaseCommand, GitRebaseAbortCommand
+
+from .branch import GitDeleteBranchCommand, GitDeleteMergedBranchesCommand
 
 from .gitk import GitGitkCommand
 

@@ -3,7 +3,7 @@ from functools import partial
 import sublime
 from sublime_plugin import WindowCommand
 
-from .util import StatusSpinner, noop
+from .util import StatusSpinner, noop, get_setting
 from .cmd import GitCmd
 from .helpers import GitRemoteHelper
 
@@ -21,6 +21,13 @@ NO_UPSTREAM = "No upstream is configured for your current branch. Do you want to
 NO_TRACKING = "No tracking information is configured for your current branch. Do you want to run Git: Pull Current Branch?"
 
 REMOTE_SHOW_TITLE_PREFIX = '*git-remote*: '
+
+
+def prune_flag():
+    """``--prune`` for fetch/pull when the ``git_fetch_prune`` setting is on
+    (the default), so remote-tracking branches deleted upstream disappear
+    locally instead of piling up."""
+    return '--prune' if get_setting('git_fetch_prune', True) else None
 
 
 class GitFetchCommand(WindowCommand, GitCmd, GitRemoteHelper):
@@ -43,7 +50,8 @@ class GitFetchCommand(WindowCommand, GitCmd, GitRemoteHelper):
                 self.window.run_command('git_remote_add')
                 return
 
-        if len(remotes) > 1:
+        names = self.get_remote_names(remotes)
+        if len(names) > 1:
             choices = self.format_quick_remotes(remotes)
             choices.append(sublime.QuickPanelItem('+ All', details=['Fetch from all configured remotes', 'git fetch --all']))
 
@@ -57,13 +65,13 @@ class GitFetchCommand(WindowCommand, GitCmd, GitRemoteHelper):
 
             self.window.show_quick_panel(choices, on_done)
         else:
-            self.on_remote(repo, remote=remotes[0])
+            self.on_remote(repo, remote=names[0])
 
     def on_remote(self, repo, remote=None):
         self.panel = self.window.get_output_panel('git-fetch')
         self.panel_shown = False
 
-        thread = self.git_async(['fetch', '-v', remote if remote else '--all'], cwd=repo, on_data=self.on_data)
+        thread = self.git_async(['fetch', '-v', prune_flag(), remote if remote else '--all'], cwd=repo, on_data=self.on_data)
         runner = StatusSpinner(thread, "Fetching from %s" % (remote if remote else "all remotes"))
         runner.start()
 
@@ -116,7 +124,8 @@ class GitPushCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
                 self.window.run_command('git_remote_add')
                 return
 
-        if len(remotes) > 1:
+        names = self.get_remote_names(remotes)
+        if len(names) > 1:
             choices = self.format_quick_remotes(remotes)
 
             def on_done(idx):
@@ -127,7 +136,7 @@ class GitPushCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
 
             self.window.show_quick_panel(choices, on_done)
         else:
-            self.on_remote(repo, branch, remotes[0])
+            self.on_remote(repo, branch, names[0])
 
     def on_remote(self, repo, branch, remote):
         def on_done(rbranch):
@@ -184,7 +193,8 @@ class GitPullCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
                 self.window.run_command('git_remote_add')
                 return
 
-        if len(remotes) > 1:
+        names = self.get_remote_names(remotes)
+        if len(names) > 1:
             choices = self.format_quick_remotes(remotes)
 
             def on_done(idx):
@@ -195,7 +205,7 @@ class GitPullCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
 
             self.window.show_quick_panel(choices, on_done)
         else:
-            self.on_remote(repo, branch, remotes[0])
+            self.on_remote(repo, branch, names[0])
 
     def on_remote(self, repo, branch, remote):
         remote_branches = self.get_remote_branches(repo, remote)
@@ -216,7 +226,7 @@ class GitPullCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
         self.panel = self.window.get_output_panel('git-pull')
         self.panel_shown = False
 
-        cmd = ['pull', '-v', remote, '%s:%s' % (branch, merge)]
+        cmd = ['pull', '-v', prune_flag(), remote, '%s:%s' % (branch, merge)]
 
         thread = self.git_async(cmd, cwd=repo, on_data=self.on_data)
         runner = StatusSpinner(thread, "Pulling %s from %s" % (merge, remote))
@@ -296,7 +306,7 @@ class GitPullCommand(WindowCommand, GitCmd, GitRemoteHelper):
         self.panel = self.window.get_output_panel('git-pull')
         self.panel_shown = False
 
-        thread = self.git_async(['pull', '-v'], cwd=repo, on_data=self.on_data)
+        thread = self.git_async(['pull', '-v', prune_flag()], cwd=repo, on_data=self.on_data)
         runner = StatusSpinner(thread, "Pulling from %s" % (branch_remote))
         runner.start()
 

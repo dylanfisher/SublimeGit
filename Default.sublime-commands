@@ -24,6 +24,7 @@
     { "caption": "Git: Amend Commit", "command": "git_commit_amend"},
     { "caption": "Git: Quick Commit", "command": "git_quick_commit"},
     { "caption": "Git: Quick Commit Current File", "command": "git_quick_commit_current_file"},
+    { "caption": "Git: Undo Last Commit", "command": "git_undo_commit"},
 
     { "caption": "Git: Stash", "command": "git_stash"},
     { "caption": "Git: Stash Include Untracked", "command": "git_stash", "args": {"untracked": true}},
@@ -38,6 +39,11 @@
     { "caption": "Git: Checkout Tag", "command": "git_checkout_tag"},
     { "caption": "Git: Checkout Current File", "command": "git_checkout_current_file"},
     { "caption": "Git: Merge", "command": "git_merge"},
+    { "caption": "Git: Abort Merge", "command": "git_merge_abort"},
+    { "caption": "Git: Rebase", "command": "git_rebase"},
+    { "caption": "Git: Abort Rebase", "command": "git_rebase_abort"},
+    { "caption": "Git: Delete Branch", "command": "git_delete_branch"},
+    { "caption": "Git: Delete Merged Branches", "command": "git_delete_merged_branches"},
 
     { "caption": "Git: Add Remote", "command": "git_remote_add"},
     { "caption": "Git: Remote", "command": "git_remote"},
@@ -54,6 +60,7 @@
     { "caption": "Git: Log", "command": "git_log"},
     { "caption": "Git: Quick Log", "command": "git_quick_log"},
     { "caption": "Git: Quick Log Current File", "command": "git_quick_log_current_file"},
+    { "caption": "Git: Log Current File", "command": "git_log_current_file"},
 
     { "caption": "Git: Show", "command": "git_show"},
 

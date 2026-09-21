@@ -9,6 +9,9 @@ Sublime Text builds. It is installed as a manual package (a symlink in the
 Changes from upstream
 ---------------------
 
+A per-commit history of every change is in [CHANGELOG.md](CHANGELOG.md).
+The summary:
+
 - Renamed the `async` parameter of `git_custom` to `run_async`. `async` has been
   a reserved keyword since Python 3.7, and Sublime Text 4213+ loads plugins under
   Python 3.14, which made the plugin fail to load. The `async` key is still
@@ -66,6 +69,23 @@ Changes from upstream
   rest of a diff, show or commit-message buffer; the new grammars include
   `source.diff#diffs` instead. `syntax/tests/syntax_test_*.txt` pin the scopes
   (run them with Sublime's "Syntax Tests" build).
+
+- New commands, ported from the cschreib/SublimeGit fork:
+  `Git: Rebase` (onto a local or remote branch, with a `git_rebase_flags`
+  setting), `Git: Abort Merge`, `Git: Abort Rebase`, `Git: Undo Last Commit`
+  (`reset --soft HEAD~1`, with a warning when the commit is already on a
+  remote), `Git: Delete Branch` (local branches, forcing after confirmation
+  when not fully merged), `Git: Delete Merged Branches` (every local branch merged into a chosen target), and
+  `Git: Log Current File` (a `*git-log*` view of `git log --follow --patch`,
+  refreshed with `r`).
+- `Git: Fetch`, `Git: Pull` and `Git: Pull Current Branch` pass `--prune`
+  unless the new `git_fetch_prune` setting is false. Remote lists put `origin`
+  and `upstream` first. A repository with a single remote no longer shows the
+  remote picker for fetch/push/pull (the old code counted `git remote -v`
+  lines, so one remote looked like two).
+- Git subprocesses are serialized per repository (`sgit.cmd.repo_lock`): a
+  worker-thread status refresh and a UI-thread stage/commit can no longer race
+  for `.git/index.lock`.
 
 The original documentation is at
 [sublimegit.readthedocs.io](http://sublimegit.readthedocs.io/en/latest/) and
