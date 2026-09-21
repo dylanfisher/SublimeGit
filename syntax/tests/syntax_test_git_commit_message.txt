@@ -29,36 +29,43 @@ Body paragraph.
 ;<- comment.line.number-sign.git-commit - constant
 ; ^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit constant.other.git-commit.header
 #   (use "git restore --staged <file>..." to unstage)
-;<- comment.line.number-sign.git-commit - meta
-;                                         ^^^^^^^^^^^ comment.line.number-sign.git-commit - meta
+;<- meta.git-commit.staged comment.line.number-sign.git-commit - meta.git-commit.line
+;                                         ^^^^^^^^^^^ meta.git-commit.staged comment.line.number-sign.git-commit - meta.git-commit.line
 #	renamed:    old_name.txt -> new_name.txt
-;<- meta.git-commit.line comment.line.number-sign.git-commit
-; ^^^^^^^^ meta.git-commit.line support.other.git-commit.status
-;         ^^^^ meta.git-commit.line comment.line.number-sign.git-commit
-;             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+;<- meta.git-commit.staged meta.git-commit.line comment.line.number-sign.git-commit
+; ^^^^^^^^ meta.git-commit.staged meta.git-commit.line meta.git-commit.status - comment - support
+;         ^^^^ meta.git-commit.staged meta.git-commit.line - comment - meta.git-commit.status - meta.git-commit.file
+;             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-commit.staged meta.git-commit.line meta.git-commit.file - comment - support
 #	modified:   sgit/status.py
-; ^^^^^^^^^ meta.git-commit.line support.other.git-commit.status
-;             ^^^^^^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+; ^^^^^^^^^ meta.git-commit.staged meta.git-commit.line meta.git-commit.status - comment
+;             ^^^^^^^^^^^^^^ meta.git-commit.staged meta.git-commit.line meta.git-commit.file - comment
 #   new file:   staged_new.txt
-;<- meta.git-commit.line comment.line.number-sign.git-commit
-;   ^^^^^^^^^ meta.git-commit.line support.other.git-commit.status
-;               ^^^^^^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+;<- meta.git-commit.staged meta.git-commit.line comment.line.number-sign.git-commit
+;   ^^^^^^^^^ meta.git-commit.staged meta.git-commit.line meta.git-commit.status - comment
+;               ^^^^^^^^^^^^^^ meta.git-commit.staged meta.git-commit.line meta.git-commit.file - comment
 #
+;<- meta.git-commit.staged comment.line.number-sign.git-commit
 # Changes not staged for commit:
-; ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit constant.other.git-commit.header
+;<- meta.git-commit.unstaged comment.line.number-sign.git-commit - meta.git-commit.staged
+; ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-commit.unstaged comment.line.number-sign.git-commit constant.other.git-commit.header
 #   (use "git add <file>..." to update what will be committed)
+;<- meta.git-commit.unstaged comment.line.number-sign.git-commit - meta.git-commit.line
 #	modified:   README.md
-;             ^^^^^^^^^ meta.git-commit.line support.other.git-commit.file
+;<- meta.git-commit.unstaged meta.git-commit.line comment.git-commit.unstaged comment.line.number-sign.git-commit
+; ^^^^^^^^^ meta.git-commit.unstaged meta.git-commit.line comment.git-commit.unstaged meta.git-commit.status - comment.line
+;             ^^^^^^^^^ meta.git-commit.unstaged meta.git-commit.line comment.git-commit.unstaged meta.git-commit.file - comment.line
 #
+;<- meta.git-commit.unstaged comment.line.number-sign.git-commit
 # Untracked files:
-; ^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit constant.other.git-commit.header
+;<- meta.git-commit.untracked comment.line.number-sign.git-commit - meta.git-commit.unstaged
+; ^^^^^^^^^^^^^^^^ meta.git-commit.untracked comment.line.number-sign.git-commit constant.other.git-commit.header
 #	newdir/
-;<- comment.line.number-sign.git-commit - meta.git-commit.line
-; ^^^^^^^ comment.line.number-sign.git-commit - meta.git-commit.line
+;<- meta.git-commit.untracked meta.git-commit.line comment.git-commit.untracked comment.line.number-sign.git-commit
+; ^^^^^^^ meta.git-commit.untracked meta.git-commit.line comment.git-commit.untracked meta.git-commit.file - comment.line
 #	untracked file.txt
-; ^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit - meta.git-commit.line
+; ^^^^^^^^^^^^^^^^^^ meta.git-commit.untracked meta.git-commit.line comment.git-commit.untracked meta.git-commit.file - comment.line
 # warning: LF will be replaced by CRLF in foo.txt.
-;<- comment.line.number-sign.git-commit - markup
+;<- comment.line.number-sign.git-commit - markup - meta.git-commit.untracked
 ; ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.number-sign.git-commit markup.deleted.warning.git-commit
 #
 # ------------------------ >8 ------------------------

@@ -24,30 +24,77 @@ contexts:
         3: string.other.git-commit.remote.name
         4: entity.other.git-commit.remote.ahead
         5: entity.other.git-commit.remote.num-commits
-    - match: '^\s*# (Changes to be committed:)'
+    # Staged files are listed in their own context so they keep the default
+    # foreground while everything else in the status block stays a comment.
+    - match: '^\s*# (Changes to be committed:)\n'
       scope: comment.line.number-sign.git-commit
       captures:
         1: constant.other.git-commit.header
-    - match: '^\s*# (Changes not staged for commit:)'
+      push: staged
+    - match: '^\s*# (Changes not staged for commit:)\n'
       scope: comment.line.number-sign.git-commit
       captures:
         1: constant.other.git-commit.header
-    - match: '^\s*# (Untracked files:)'
+      push: unstaged
+    - match: '^\s*# (Untracked files:)\n'
       scope: comment.line.number-sign.git-commit
       captures:
         1: constant.other.git-commit.header
+      push: untracked
     - match: '^\s*# (warning:.+)'
       scope: comment.line.number-sign.git-commit
       captures:
         1: markup.deleted.warning.git-commit
-    # "#\tmodified:   path"
+    # "#\tmodified:   path" outside the staged section: muted like the rest
+    # of the status block.
+    - match: '^\s*((?:#   )|(?:#\t))(.+:)(\s+)(.+)'
+      scope: meta.git-commit.line comment.line.number-sign.git-commit
+      captures:
+        2: meta.git-commit.status
+        4: meta.git-commit.file
+    - match: '^\s*#(.*)'
+      scope: comment.line.number-sign.git-commit
+    - include: scope:source.git-diff
+
+  # Each status section runs from its header up to the "#" line that ends it
+  # (or the next header). Staged file lines carry no color scope, so they
+  # render in the default foreground; unstaged and untracked file lines carry
+  # a section-specific comment scope so schemes can mute them by degree. The
+  # "#" prefix is always a plain comment.
+  staged:
+    - meta_scope: meta.git-commit.staged
     - match: '^\s*((?:#   )|(?:#\t))(.+:)(\s+)(.+)'
       scope: meta.git-commit.line
       captures:
         1: comment.line.number-sign.git-commit
-        2: support.other.git-commit.status
-        3: comment.line.number-sign.git-commit
-        4: support.other.git-commit.file
+        2: meta.git-commit.status
+        4: meta.git-commit.file
+    - include: section-end
+
+  unstaged:
+    - meta_scope: meta.git-commit.unstaged
+    - match: '^\s*((?:#   )|(?:#\t))(.+:)(\s+)(.+)'
+      scope: meta.git-commit.line comment.git-commit.unstaged
+      captures:
+        1: comment.line.number-sign.git-commit
+        2: meta.git-commit.status
+        4: meta.git-commit.file
+    - include: section-end
+
+  untracked:
+    - meta_scope: meta.git-commit.untracked
+    - match: '^\s*(#\t)(.+)'
+      scope: meta.git-commit.line comment.git-commit.untracked
+      captures:
+        1: comment.line.number-sign.git-commit
+        2: meta.git-commit.file
+    - include: section-end
+
+  section-end:
+    - match: '^\s*#[ \t]*\n'
+      scope: comment.line.number-sign.git-commit
+      pop: 1
+    - match: '(?=^\s*# (?:Changes to be committed|Changes not staged|Untracked files|warning:|-+ >8))'
+      pop: 1
     - match: '^\s*#(.*)'
       scope: comment.line.number-sign.git-commit
-    - include: scope:source.git-diff

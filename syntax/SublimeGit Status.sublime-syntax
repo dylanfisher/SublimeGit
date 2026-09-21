@@ -69,8 +69,9 @@ contexts:
   stashes:
     - meta_scope: meta.git-status.stashes
     - include: section-end
+    # Muted (comment) so the scheme de-emphasises stashes.
     - match: '\t(.+): (?:WIP )?[oO]n (.+): (.+)\n'
-      scope: meta.git-status.line
+      scope: meta.git-status.line comment.git-status.stash
       captures:
         1: meta.git-status.stash.name
         2: meta.git-status.stash.branch
@@ -79,8 +80,9 @@ contexts:
   untracked_files:
     - meta_scope: meta.git-status.untracked_files
     - include: section-end
+    # Muted (comment) so the scheme de-emphasises untracked files.
     - match: '\t(.+)\n'
-      scope: meta.git-status.line
+      scope: meta.git-status.line comment.git-status.untracked
       captures:
         1: meta.git-status.file
 
@@ -92,7 +94,11 @@ contexts:
   staged_changes:
     - meta_scope: meta.git-status.staged_changes
     - include: section-end
-    - include: file-status-line
+    # Highlighted (markup.inserted) so staged lines stand out from unstaged.
+    - match: '\t(\w+) *(.+)\n'
+      scope: meta.git-status.line markup.inserted.git-status.staged
+      captures:
+        2: meta.git-status.file
 
   # "\t<Status label> <path>"; for renames the path is "old -> new".
   file-status-line:

@@ -6,6 +6,23 @@ newest first. Upstream's own release notes (the old Package Control
 `messages/` files) were removed; the original documentation at
 <https://sublimegit.readthedocs.io/en/latest/> still applies.
 
+## Distinguish staged, unstaged and untracked files in the status and commit views
+
+### Changed
+
+- Status view: staged file lines are scoped `markup.inserted.git-status.staged`
+  so colour schemes highlight them; untracked file lines and stash lines are
+  scoped `comment.git-status.untracked` and `comment.git-status.stash` so they
+  are muted. Unstaged lines keep the default foreground.
+- Commit message view: the "Changes to be committed", "Changes not staged for
+  commit" and "Untracked files" sections of the status block are now separate
+  contexts (`meta.git-commit.staged`, `.unstaged`, `.untracked`). Staged file
+  lines render in the default foreground; unstaged and untracked file lines
+  carry `comment.git-commit.unstaged` / `comment.git-commit.untracked` so they
+  stay muted with the rest of the comment block. The `support.other.git-commit.status`
+  and `support.other.git-commit.file` scopes are replaced by
+  `meta.git-commit.status` and `meta.git-commit.file`.
+
 ## Add rebase, abort, undo commit, branch deletion and file log commands
 
 ### Added

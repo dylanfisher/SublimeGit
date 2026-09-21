@@ -19,6 +19,7 @@ Stashes:
 ;^^^^^^^ meta.git-status.stashes constant.other.git-status.header
 	0: WIP on main: a80da22 Add helper function (second commit)
 ;<- text.git-status meta.git-status.stashes meta.git-status.line - meta.git-status.stash.name
+;^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.git-status.stash
 ;^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.name
 ; ^^^^^^^^^ meta.git-status.stashes meta.git-status.line - meta.git-status.stash
 ;          ^^^^ meta.git-status.stashes meta.git-status.line meta.git-status.stash.branch
@@ -32,6 +33,7 @@ Untracked files:
 ;<- meta.git-status.untracked_files constant.other.git-status.header - meta.git-status.stashes
 	newdir/a.txt
 ;<- meta.git-status.untracked_files meta.git-status.line - meta.git-status.file
+;^^^^^^^^^^^^ comment.git-status.untracked
 ;^^^^^^^^^^^^ meta.git-status.untracked_files meta.git-status.line meta.git-status.file
 	untracked file.txt
 ;^^^^^^^^^^^^^^^^^^ meta.git-status.untracked_files meta.git-status.line meta.git-status.file
@@ -40,6 +42,7 @@ Unstaged changes:
 ;<- meta.git-status.unstaged_changes constant.other.git-status.header - meta.git-status.untracked_files
 	Modified   README.md
 ;<- text.git-status meta.git-status.unstaged_changes meta.git-status.line - meta.git-status.file
+;^^^^^^^^^^^^^^^^^^^^ meta.git-status.line - markup.inserted - comment
 ;^^^^^^^^^^^ meta.git-status.unstaged_changes meta.git-status.line - meta.git-status.file
 ;           ^^^^^^^^^ meta.git-status.unstaged_changes meta.git-status.line meta.git-status.file
 	Deleted    docs/old.rst
@@ -52,6 +55,7 @@ Staged changes:
 ;<- meta.git-status.staged_changes constant.other.git-status.header - meta.git-status.unstaged_changes
 	Renamed    old_name.txt -> new_name.txt
 ;^^^^^^^^^^^ meta.git-status.staged_changes meta.git-status.line - meta.git-status.file
+;^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ markup.inserted.git-status.staged
 ;           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-status.staged_changes meta.git-status.line meta.git-status.file
 	Added      staged_new.txt
 ;           ^^^^^^^^^^^^^^ meta.git-status.staged_changes meta.git-status.line meta.git-status.file
