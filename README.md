@@ -1,6 +1,29 @@
-SublimeGit
-==========
-[![Documentation](https://readthedocs.org/projects/sublimegit/badge/?version=latest&style=flat)](http://sublimegit.readthedocs.io/en/latest/)
+SublimeGit (custom fork)
+========================
+
+This is a personal fork of [SublimeGit](https://github.com/SublimeGit/SublimeGit),
+based on release 1.0.37, maintained to keep the plugin working on current
+Sublime Text builds. It is installed as a manual package (a symlink in the
+`Packages` folder), not through Package Control.
+
+Changes from upstream
+---------------------
+
+- Renamed the `async` parameter of `git_custom` to `run_async`. `async` has been
+  a reserved keyword since Python 3.7, and Sublime Text 4213+ loads plugins under
+  Python 3.14, which made the plugin fail to load. The `async` key is still
+  accepted in user-defined commands for backward compatibility.
+- Removed `package-metadata.json` so Package Control treats this as a manual
+  package and does not try to update or replace it.
+
+The original documentation is at
+[sublimegit.readthedocs.io](http://sublimegit.readthedocs.io/en/latest/) and
+still applies. The upstream README follows below for reference.
+
+---
+
+Upstream README
+===============
 
 SublimeGit is going open source. This is a short TODO list of what needs to happen:
  - [x] Split plugin code from website code
