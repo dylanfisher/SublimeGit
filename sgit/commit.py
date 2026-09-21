@@ -86,8 +86,7 @@ class GitCommitCommand(WindowCommand, GitCommitWindowCmd):
         if not repo:
             return
 
-        staged = self.has_staged_changes(repo)
-        dirty = self.has_unstaged_changes(repo)
+        staged, dirty = self.get_changes(repo)
 
         if not add and not staged:
             return sublime.error_message(GIT_NOTHING_STAGED)
@@ -244,8 +243,7 @@ class GitQuickCommitCommand(WindowCommand, GitCommitWindowCmd):
         if not repo:
             return
 
-        staged = self.has_staged_changes(repo)
-        dirty = self.has_unstaged_changes(repo)
+        staged, dirty = self.get_changes(repo)
 
         if not staged and not dirty:
             sublime.error_message(GIT_WORKING_DIR_CLEAN.capitalize())
@@ -256,7 +254,10 @@ class GitQuickCommitCommand(WindowCommand, GitCommitWindowCmd):
     def on_commit_message(self, repo, msg=None):
         if not msg:
             msg = ''
-        cmd = ['commit', '-F', '-'] if self.has_staged_changes(repo) else ['commit', '-a', '-F', '-']
+        # re-checked on submit: the user may have staged something while the
+        # input panel was open (one process, as before)
+        staged, _ = self.get_changes(repo)
+        cmd = ['commit', '-F', '-'] if staged else ['commit', '-a', '-F', '-']
         stdout = self.git_string(cmd, stdin=msg, cwd=repo)
         self.show_commit_panel(stdout)
         self.window.run_command('git_status', {'refresh_only': True})

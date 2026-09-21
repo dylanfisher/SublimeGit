@@ -27,6 +27,15 @@ def format_details(*parts):
     return [html.escape(p, quote=False) for p in parts if p]
 
 
+ERE_SPECIAL_RE = re.compile(r'([.^$*+?()\[\]{}|\\])')
+
+
+def ere_escape(string):
+    """Escape ``string`` for use as a literal inside a POSIX extended regexp
+    (what ``git config --get-regexp`` matches with)."""
+    return ERE_SPECIAL_RE.sub(r'\\\1', string)
+
+
 GIT_INIT_DIALOG = ("Could not find any git repositories based on the open files and folders. "
                    "Do you want to initialize a repository?")
 
@@ -258,6 +267,30 @@ class GitRemoteHelper(GitBranchHelper):
     def get_remote_url(self, repo, remote):
         return self.git_string(['config', 'remote.%s.url' % remote], cwd=repo)
 
+    def get_remote_and_url(self, repo, branch):
+        """Return ``(remote, url)`` for ``branch`` using a single git process.
+
+        ``branch.<branch>.remote`` stays authoritative for the remote name (it
+        is not derived from the upstream ref), and the url is picked from the
+        ``remote.<name>.url`` entries returned by the same call. Returns
+        ``(None, None)`` when the branch has no configured remote.
+        """
+        if not branch:
+            return (None, None)
+
+        pattern = r'^(branch\.%s\.remote|remote\..+\.url)$' % ere_escape(branch)
+        remote, urls = None, {}
+        for line in self.git_lines(['config', '--get-regexp', pattern], cwd=repo):
+            key, _, value = line.partition(' ')
+            if key.startswith('branch.') and key.endswith('.remote'):
+                remote = value
+            elif key.startswith('remote.') and key.endswith('.url'):
+                urls[key[len('remote.'):-len('.url')]] = value
+
+        if not remote:
+            return (None, None)
+        return (remote, urls.get(remote, ''))
+
     def get_branch_upstream(self, repo, branch):
         return (self.get_branch_remote(repo, branch), self.get_branch_merge(repo, branch))
 
@@ -305,13 +338,102 @@ class GitErrorHelper(object):
         return msg
 
 
+# The index of the path field in each porcelain v2 entry kind, i.e. the number
+# of space-separated fields that precede it (paths may contain spaces, so the
+# split is bounded by this).
+PORCELAIN_V2_PATH_FIELD = {
+    '1': 8,   # 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+    '2': 9,   # 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>\0<origPath>
+    'u': 10,  # u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+}
+
+
+def parse_porcelain_v2_z(output):
+    """Parse ``git status --porcelain=v2 --branch -z`` output.
+
+    Returns ``(branch, upstream, lines)``, where ``lines`` are v1-style
+    porcelain strings: ``"XY path"``, or ``"XY old -> new"`` for renames and
+    copies. ``branch`` is ``None`` for a detached HEAD (an unborn branch still
+    reports its name). Unmodified states are reported as ``.`` in v2 and are
+    translated back to a space.
+    """
+    branch, upstream, lines = None, None, []
+
+    rows = output.split('\x00')
+    idx = 0
+    while idx < len(rows):
+        row = rows[idx]
+        idx += 1
+        if not row:
+            continue
+
+        kind = row[0]
+        if kind == '#':
+            key, _, value = row[2:].partition(' ')
+            if key == 'branch.head':
+                branch = None if value == '(detached)' else value
+            elif key == 'branch.upstream':
+                upstream = value or None
+            continue
+
+        if kind in ('1', '2', 'u'):
+            status = row[2:4].replace('.', ' ')
+            path = row.split(' ', PORCELAIN_V2_PATH_FIELD[kind])[PORCELAIN_V2_PATH_FIELD[kind]]
+            if kind == '2':
+                # with -z the original path is a separate NUL-terminated field
+                orig = rows[idx] if idx < len(rows) else ''
+                idx += 1
+                lines.append("%s %s -> %s" % (status, orig, path))
+            else:
+                lines.append("%s %s" % (status, path))
+        elif kind in ('?', '!'):
+            lines.append("%s%s %s" % (kind, kind, row[2:]))
+
+    return branch, upstream, lines
+
+
 class GitStatusHelper(object):
 
     def file_in_git(self, repo, filename):
         return self.git_exit_code(['ls-files', filename, '--error-unmatch'], cwd=repo) == 0
 
+    def get_changes(self, repo):
+        """Return ``(staged, unstaged)`` booleans from a single git process.
+
+        This is the one-call equivalent of ``has_staged_changes(repo)`` and
+        ``has_unstaged_changes(repo)``: ``git status --porcelain -z
+        --untracked-files=no`` reports the same index/worktree columns that
+        ``git diff --quiet --cached`` / ``git diff --quiet`` base their exit
+        codes on. Unmerged entries (``UU``, ``AA``, ``DD``, ``AU``, ...) have
+        both columns set and so count as both staged and unstaged, which is
+        what the two diff calls report for a conflict.
+        """
+        output = self.git_string(['status', '--porcelain', '-z', '--untracked-files=no'],
+                                 cwd=repo, strip=False)
+
+        staged, unstaged = False, False
+        records = output.split('\x00')
+        idx = 0
+        while idx < len(records):
+            record = records[idx]
+            idx += 1
+            if len(record) < 2:
+                continue
+            index, worktree = record[0], record[1]
+            if index in ('R', 'C'):
+                # with -z the original path follows as its own record
+                idx += 1
+            if index not in (' ', '?', '!'):
+                staged = True
+            if worktree not in (' ', '?', '!'):
+                unstaged = True
+            if staged and unstaged:
+                break
+
+        return staged, unstaged
+
     def has_changes(self, repo):
-        return self.has_staged_changes(repo) or self.has_unstaged_changes(repo)
+        return any(self.get_changes(repo))
 
     def has_staged_changes(self, repo):
         return self.git_exit_code(['diff', '--exit-code', '--quiet', '--cached'], cwd=repo) != 0
@@ -319,34 +441,29 @@ class GitStatusHelper(object):
     def has_unstaged_changes(self, repo):
         return self.git_exit_code(['diff', '--exit-code', '--quiet'], cwd=repo) != 0
 
-    # def get_porcelain_status(self, repo):
-    #     mode = self.get_untracked_mode()
-    #     cmd = ['status', '--porcelain', ('--untracked-files=%s' % mode) if mode else None]
-    #     return self.git_lines(cmd, cwd=repo)
+    def get_branch_and_status(self, repo):
+        """Run one ``git status --porcelain=v2 --branch -z`` and return
+        ``(branch, upstream, lines)``.
 
-    def get_porcelain_status(self, repo):
+        ``branch`` is ``None`` for a detached HEAD, ``upstream`` is ``None``
+        when the branch has none, and ``lines`` are the v1-style porcelain
+        strings (``"XY path"`` / ``"XY old -> new"``) the rest of the plugin
+        expects. Using the v2 format means the branch name and its upstream
+        come out of the same process as the file status.
+        """
         mode = self.get_untracked_mode()
-        cmd = ['status', '-z', ('--untracked-files=%s' % mode) if mode else None]
+        cmd = ['status', '--porcelain=v2', '--branch', '-z',
+               ('--untracked-files=%s' % mode) if mode else None]
 
         output = self.git_string(cmd, cwd=repo, strip=False)
-        rows = output.split('\x00')
-        lines = []
-        idx = 0
-        while idx < len(rows):
-            row = rows[idx]
-            if row and not row.startswith('#'):
-                status, filename = row[:2], row[3:]
-                if status[0] == 'R':
-                    lines.append("%s %s -> %s" % (status, rows[idx + 1], filename))
-                    idx += 1
-                else:
-                    lines.append("%s %s" % (status, filename))
-            idx += 1
-        return lines
+        return parse_porcelain_v2_z(output)
 
-    def get_files_status(self, repo):
+    def get_porcelain_status(self, repo):
+        return self.get_branch_and_status(repo)[2]
+
+    def get_files_status(self, repo, lines=None):
         untracked, unstaged, staged = [], [], []
-        status = self.get_porcelain_status(repo)
+        status = self.get_porcelain_status(repo) if lines is None else lines
         for l in status:
             state, filename = l[:2], l[3:]
             index, worktree = state

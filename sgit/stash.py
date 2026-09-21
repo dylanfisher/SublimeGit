@@ -55,10 +55,7 @@ class GitStashCommand(WindowCommand, GitCmd, GitStatusHelper):
             self.git(['stash', 'save', '--include-untracked' if untracked else None, '--', title], cwd=repo)
             self.window.run_command('git_status', {'refresh_only': True})
 
-        # update the index
-        self.git_exit_code(['update-index', '--refresh'], cwd=repo)
-
-        # get files status
+        # get files status (the status call refreshes the index itself)
         untracked_files, unstaged_files, _ = self.get_files_status(repo)
 
         # check for if there's something to stash

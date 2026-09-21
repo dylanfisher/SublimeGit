@@ -6,6 +6,7 @@ from sublime_plugin import TextCommand, WindowCommand, EventListener
 from .util import find_view_by_settings, get_setting
 from .cmd import GitCmd
 from .helpers import GitStatusHelper, GitRepoHelper
+from .status import GitViewRefreshCmd, forget_view_refresh
 
 
 GIT_BLAME_TITLE_PREFIX = '*git-blame*: '
@@ -98,7 +99,10 @@ class GitBlameCommand(WindowCommand, GitCmd, GitStatusHelper):
         view.run_command('git_blame_refresh', {'filename': filename, 'revision': revision, 'rows': rows})
 
 
-class GitBlameRefreshCommand(TextCommand, GitCmd):
+class GitBlameRefreshCommand(TextCommand, GitViewRefreshCmd, GitCmd):
+    """Refresh a blame view: ``git blame --porcelain`` and the formatting run
+    in a worker thread, the buffer is written by ``git_blame_write`` on the
+    main thread."""
 
     HEADER_RE = re.compile(r'^(?P<sha>[0-9a-f]{40}) (\d+) (\d+) ?(\d+)?$')
 
@@ -121,6 +125,13 @@ class GitBlameRefreshCommand(TextCommand, GitCmd):
         return fieldname, value
 
     def get_blame(self, repo, filename, revision=None):
+        """Parse ``git blame --porcelain``.
+
+        Returns ``(commits, lines, error)``. ``error`` is a message to show
+        the user (``None`` when everything parsed); it is returned rather
+        than reported here because this runs in a worker thread, where
+        ``sublime.error_message`` must not be called.
+        """
         data = self.git_lines(['blame', '--porcelain', revision if revision else None, '--', filename], cwd=repo)
 
         commits = {}
@@ -140,8 +151,7 @@ class GitBlameRefreshCommand(TextCommand, GitCmd):
                     field, val = self.parse_commit_line(item)
                     commits.setdefault(current_commit, {})[field] = val
             except Exception as e:
-                sublime.error_message('Error parsing git blame output: %s', e)
-                return {}, []
+                return {}, [], 'Error parsing git blame output: %s' % e
 
         abbrev_length = 7
         while abbrev_length < 40:
@@ -153,7 +163,7 @@ class GitBlameRefreshCommand(TextCommand, GitCmd):
         for k in commits:
             commits[k]['abbrev'] = commits[k]['sha'][:abbrev_length]
 
-        return commits, lines
+        return commits, lines, None
 
     def get_commit_date(self, commit):
         return datetime.fromtimestamp(commit.get('author-time'))
@@ -189,13 +199,56 @@ class GitBlameRefreshCommand(TextCommand, GitCmd):
         revision = revision or self.view.settings().get('git_blame_rev')
         repo = self.view.settings().get('git_repo')
 
-        commits, lines = self.get_blame(repo, filename, revision)
-        if not commits or not lines:
+        self.request_refresh({
+            'repo': repo,
+            'filename': filename,
+            'revision': revision,
+            'rows': list(rows) if rows else [],
+        })
+
+    def gather(self, request):
+        """Worker thread: run git blame and format it. Returns
+        ``(commits, lines, blame_text, error)``."""
+        commits, lines, error = self.get_blame(request['repo'], request['filename'], request['revision'])
+        if error or not commits or not lines:
+            # format_blame() cannot deal with an empty blame (max() of an
+            # empty sequence), so stop here, exactly like the old code did.
+            return {}, [], '', error
+        return commits, lines, self.format_blame(commits, lines), error
+
+    def deliver(self, request, result):
+        """Main thread: report a parse error, or hand the blame to the write
+        command which needs an ``edit``."""
+        if result is None:
             return
+
+        commits, lines, blame, error = result
+        if error:
+            sublime.error_message(error)
+            return
+
+        if not commits or not lines or not blame:
+            return
+
         GitBlameCache.commits[self.view.id()] = commits
         GitBlameCache.lines[self.view.id()] = lines
 
-        blame = self.format_blame(commits, lines)
+        self.view.run_command('git_blame_write', {
+            'content': blame,
+            'rows': request['rows'],
+        })
+
+
+class GitBlameWriteCommand(TextCommand):
+    """Apply phase of ``git_blame_refresh``: write the buffer, mark the
+    originally selected lines and place the caret. Hidden; only invoked from
+    the main thread by the refresh."""
+
+    def is_visible(self):
+        return False
+
+    def run(self, edit, content='', rows=None):
+        blame = content
 
         if blame:
             # write blame to file
@@ -229,8 +282,9 @@ class GitBlameEventListener(EventListener):
     def on_pre_close(self, view):
         GitBlameCache.commits.pop(view.id(), None)
         GitBlameCache.lines.pop(view.id(), None)
+        forget_view_refresh(view.id())
 
-    def on_selection_modified(self, view):
+    def on_selection_modified_async(self, view):
         if view.settings().get('git_view') == 'blame':
             commits = GitBlameCache.commits.get(view.id())
             lines = GitBlameCache.lines.get(view.id())

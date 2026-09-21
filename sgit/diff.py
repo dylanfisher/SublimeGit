@@ -132,6 +132,25 @@ class GitDiffTextCmd(GitCmd, GitDiffHelper):
             view = self.view
             sublime.set_timeout(partial(view.show, point, True), 50)
 
+    def iter_lines(self):
+        """Yield ``(text, Region)`` for every line in the buffer.
+
+        Equivalent to ``zip(map(view.substr, view.lines(whole_buffer)),
+        view.lines(whole_buffer))`` but with a single API round-trip instead of
+        one per line: the whole buffer is read once and split in Python while
+        the character offsets are tracked.
+
+        ``str.split('\\n')`` reproduces ``view.lines()`` exactly, including the
+        empty trailing line a buffer ending in a newline produces ("a\\nb\\n" ->
+        "a", "b", "") and the single empty line of an empty buffer. Regions
+        exclude the newline, as ``view.lines()`` regions do.
+        """
+        buf = self.view.substr(sublime.Region(0, self.view.size()))
+        start = 0
+        for text in buf.split('\n'):
+            yield text, sublime.Region(start, start + len(text))
+            start += len(text) + 1
+
     def parse_diff(self):
         sections = []
         state = None
@@ -143,9 +162,7 @@ class GitDiffTextCmd(GitCmd, GitDiffHelper):
         prev_hunk = None
         current_hunk = None
 
-        for line in self.view.lines(sublime.Region(0, self.view.size())):
-            linetext = self.view.substr(line)
-
+        for linetext, line in self.iter_lines():
             if linetext.startswith('diff --git'):
                 state = 'header'
                 # new file starts
@@ -170,7 +187,7 @@ class GitDiffTextCmd(GitCmd, GitDiffHelper):
                     prev_hunk = line
 
                 current_hunk = line
-            elif state == 'hunk' and linetext[0] in (' ', '-', '+'):
+            elif state == 'hunk' and linetext[:1] in (' ', '-', '+'):
                 current_hunk = current_hunk.cover(line)
             elif state == 'header':
                 current_file = current_file.cover(line)
@@ -207,8 +224,10 @@ class GitDiffTextCmd(GitCmd, GitDiffHelper):
         patch = []
         for (hstart, hend), hunks in selected_hunks.items():
             header = sublime.Region(hstart, hend)
-            for head in self.view.lines(header):
-                headline = self.view.substr(head)
+            # A header region always spans whole lines (it is built by covering
+            # line regions), so splitting one substr() is the same as
+            # substr()-ing each of view.lines(header), minus the round-trips.
+            for headline in self.view.substr(header).split('\n'):
                 if headline.startswith('---') or headline.startswith('+++'):
                     patch.append("%s\n" % headline.strip())
                 else:

@@ -337,6 +337,32 @@ class TestRemoteHelper(object):
                                            ['config', 'branch.main.remote'],
                                            ['config', 'branch.main.merge']]
 
+    def test_get_remote_and_url_single_call(self):
+        r = Remotes(lines=['branch.main.remote upstream',
+                           'remote.origin.url https://example.com/a.git',
+                           'remote.upstream.url git@example.com:b.git'])
+        assert r.get_remote_and_url('/repo', 'main') == ('upstream', 'git@example.com:b.git')
+        assert [c[1] for c in r.calls] == [
+            ['config', '--get-regexp', r'^(branch\.main\.remote|remote\..+\.url)$']]
+
+    def test_get_remote_and_url_escapes_branch_name(self):
+        r = Remotes(lines=[])
+        r.get_remote_and_url('/repo', 'feat/a.b+c')
+        assert r.calls[0][1][2] == r'^(branch\.feat/a\.b\+c\.remote|remote\..+\.url)$'
+
+    def test_get_remote_and_url_without_remote(self):
+        r = Remotes(lines=['remote.origin.url https://example.com/a.git'])
+        assert r.get_remote_and_url('/repo', 'main') == (None, None)
+
+    def test_get_remote_and_url_without_branch_does_not_run_git(self):
+        r = Remotes(lines=[])
+        assert r.get_remote_and_url('/repo', None) == (None, None)
+        assert r.calls == []
+
+    def test_get_remote_and_url_remote_without_url(self):
+        r = Remotes(lines=['branch.main.remote origin'])
+        assert r.get_remote_and_url('/repo', 'main') == ('origin', '')
+
 
 # ---------------------------------------------------------------------------
 # GitStashHelper / GitErrorHelper
@@ -391,28 +417,59 @@ class TestStatusHelper(object):
         assert s.get_untracked_mode() == 'all'
 
     def test_get_porcelain_status_parses_nul_separated_output(self, settings):
-        raw = '\x00'.join([' M modified.txt', 'R  new name.txt', 'old name.txt',
-                           'A  added.txt', '?? untracked.txt', 'MM both.txt', '']) 
+        raw = '\x00'.join([
+            '# branch.oid ' + '1' * 40,
+            '# branch.head main',
+            '# branch.upstream origin/main',
+            '1 .M N... 100644 100644 100644 1111111 1111111 modified.txt',
+            '2 R. N... 100644 100644 100644 1111111 1111111 R100 new name.txt',
+            'old name.txt',
+            '1 A. N... 000000 100644 100644 0000000 1111111 added.txt',
+            '? untracked.txt',
+            '1 MM N... 100644 100644 100644 1111111 1111111 both.txt',
+            'u UU N... 100644 100644 100644 100644 1111111 1111111 1111111 conflict.txt',
+            '! ignored.txt',
+            ''])
         s = Status(string=raw)
-        assert s.get_porcelain_status('/repo') == [
+        assert s.get_branch_and_status('/repo') == ('main', 'origin/main', [
             ' M modified.txt',
             'R  old name.txt -> new name.txt',
             'A  added.txt',
             '?? untracked.txt',
             'MM both.txt',
-        ]
-        assert s.calls == [('string', ['status', '-z', '--untracked-files=all'],
+            'UU conflict.txt',
+            '!! ignored.txt',
+        ])
+        assert s.calls == [('string', ['status', '--porcelain=v2', '--branch', '-z',
+                                       '--untracked-files=all'],
                             {'cwd': '/repo', 'strip': False})]
+
+    def test_get_porcelain_status_returns_only_lines(self, settings):
+        s = Status(string='\x00'.join([
+            '# branch.head main',
+            '1 .M N... 100644 100644 100644 1111111 1111111 a.txt', '']))
+        assert s.get_porcelain_status('/repo') == [' M a.txt']
+
+    def test_get_branch_and_status_detached_head(self, settings):
+        s = Status(string='# branch.oid ' + '1' * 40 + '\x00# branch.head (detached)\x00')
+        assert s.get_branch_and_status('/repo') == (None, None, [])
+
+    def test_get_branch_and_status_paths_with_spaces(self, settings):
+        s = Status(string='\x00'.join([
+            '# branch.head my/branch',
+            '1 .M N... 100644 100644 100644 1111111 1111111 a file.txt',
+            '2 RD N... 100644 100644 100644 1111111 1111111 R100 new name.txt',
+            'old name.txt', '']))
+        assert s.get_branch_and_status('/repo') == ('my/branch', None, [
+            ' M a file.txt',
+            'RD old name.txt -> new name.txt',
+        ])
 
     def test_get_porcelain_status_untracked_mode_auto_omits_flag(self, settings):
         settings.set('git_status_untracked_files', 'auto')
         s = Status(string='')
         assert s.get_porcelain_status('/repo') == []
-        assert s.calls[0][1] == ['status', '-z', None]
-
-    def test_get_porcelain_status_skips_comment_rows(self, settings):
-        s = Status(string='# branch.head main\x00 M a.txt\x00')
-        assert s.get_porcelain_status('/repo') == [' M a.txt']
+        assert s.calls[0][1] == ['status', '--porcelain=v2', '--branch', '-z', None]
 
     def test_get_files_status_classification(self, settings):
         class S(GitStatusHelper):
@@ -431,14 +488,36 @@ class TestStatusHelper(object):
         s = Status(exit_code=1)
         assert s.has_staged_changes('/repo') is True
         assert s.has_unstaged_changes('/repo') is True
-        assert s.has_changes('/repo') is True
         assert s.file_in_git('/repo', 'f') is False
         assert [c[1] for c in s.calls[:2]] == [['diff', '--exit-code', '--quiet', '--cached'],
                                                ['diff', '--exit-code', '--quiet']]
         assert s.calls[-1][1] == ['ls-files', 'f', '--error-unmatch']
         clean = Status(exit_code=0)
-        assert clean.has_changes('/repo') is False
         assert clean.file_in_git('/repo', 'f') is True
+
+    def test_get_changes_parses_one_status_call(self, settings):
+        s = Status(string='M  staged.txt\x00')
+        assert s.get_changes('/repo') == (True, False)
+        assert len(s.calls) == 1
+        assert s.calls[0][1] == ['status', '--porcelain', '-z', '--untracked-files=no']
+        assert s.calls[0][2].get('strip') is False
+
+        assert Status(string='').get_changes('/repo') == (False, False)
+        assert Status(string=' M x.txt\x00').get_changes('/repo') == (False, True)
+        assert Status(string='MM x.txt\x00').get_changes('/repo') == (True, True)
+        assert Status(string='M  a.txt\x00 M b.txt\x00').get_changes('/repo') == (True, True)
+        assert Status(string='UU x.txt\x00').get_changes('/repo') == (True, True)
+        assert Status(string='AA x.txt\x00').get_changes('/repo') == (True, True)
+        assert Status(string='DD x.txt\x00').get_changes('/repo') == (True, True)
+        # the rename source is its own NUL-terminated record, not an entry
+        assert Status(string='R  new.txt\x00old.txt\x00').get_changes('/repo') == (True, False)
+
+    def test_has_changes_uses_get_changes(self, settings):
+        s = Status(string=' M x.txt\x00')
+        assert s.has_changes('/repo') is True
+        assert len(s.calls) == 1
+        assert s.calls[0][1][0] == 'status'
+        assert Status(string='').has_changes('/repo') is False
 
 
 # ---------------------------------------------------------------------------

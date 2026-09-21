@@ -211,6 +211,20 @@ class Region(object):
             return self.begin() <= x.begin() and x.end() <= self.end()
         return self.begin() <= x <= self.end()
 
+    def cover(self, other):
+        """Smallest region spanning both. Like the real API, the result is
+        normalized (a <= b) even when either input is reversed."""
+        return Region(min(self.begin(), other.begin()), max(self.end(), other.end()))
+
+    def intersects(self, other):
+        return (self.end() > other.begin() and other.end() > self.begin()) or \
+            self == other or (self.empty() and other.contains(self.begin())) or \
+            (other.empty() and self.contains(other.begin()))
+
+    def intersection(self, other):
+        a, b = max(self.begin(), other.begin()), min(self.end(), other.end())
+        return Region(a, b) if a < b else Region(0, 0)
+
     def __eq__(self, other):
         return isinstance(other, Region) and self.a == other.a and self.b == other.b
 
@@ -237,13 +251,21 @@ def _new_id():
 
 
 class View(object):
-    def __init__(self, file_name=None, window=None, settings=None, view_id=None, content=''):
+    def __init__(self, file_name=None, window=None, settings=None, view_id=None, content='',
+                 scopes=None):
         self._id = view_id if view_id is not None else _new_id()
+        # [(begin, end, 'scope.name')]; may nest/overlap, see set_scopes()
+        self._scopes = list(scopes or [])
+        self._change_count = 1
+        # {'score_selector': n, 'find_by_selector': n, 'substr': n, 'lines': n,
+        # 'full_line': n}; tests assert on these
+        self.api_calls = {}
         self._file_name = file_name
         self._window = window
         self._settings = Settings(settings)
         self._status = {}
         self._sel = Selection()
+        self._regions = {}
         self.commands = []
         self._name = None
         self._read_only = False
@@ -323,19 +345,27 @@ class View(object):
         return len(self._buf)
 
     def substr(self, x):
+        self._count_call('substr')
         if isinstance(x, Region):
             return self._buf[x.begin():x.end()]
         return self._buf[x:x + 1]
 
+    def change_count(self):
+        """Bumped by every buffer modification, like the real API."""
+        return self._change_count
+
     def insert(self, edit, point, text):
         self._buf = self._buf[:point] + text + self._buf[point:]
+        self._change_count += 1
         return len(text)
 
     def erase(self, edit, region):
         self._buf = self._buf[:region.begin()] + self._buf[region.end():]
+        self._change_count += 1
 
     def replace(self, edit, region, text):
         self._buf = self._buf[:region.begin()] + text + self._buf[region.end():]
+        self._change_count += 1
 
     def _line_bounds(self, point):
         point = max(0, min(point, len(self._buf)))
@@ -353,11 +383,13 @@ class View(object):
         return Region(start, end)
 
     def full_line(self, x):
+        self._count_call('full_line')
         line = self.line(x)
         end = min(line.end() + 1, len(self._buf))
         return Region(line.begin(), end)
 
     def lines(self, region):
+        self._count_call('lines')
         out = []
         point = region.begin()
         while True:
@@ -395,14 +427,58 @@ class View(object):
             return Region(-1, -1)
         return Region(idx, idx + len(pattern))
 
+    # --- scopes -----------------------------------------------------------
+    # A view has no syntax here, so scopes are supplied by the test as a list
+    # of ``(begin, end, 'scope.name')`` spans (a point's scopes are all the
+    # spans that contain it, i.e. the real scope stack). Without them nothing
+    # is scoped, as before.
+
+    def set_scopes(self, scopes):
+        self._scopes = list(scopes)
+        return self
+
+    @staticmethod
+    def _selector_matches(scope, selector):
+        return scope == selector or scope.startswith(selector + '.')
+
+    def _count_call(self, name):
+        self.api_calls[name] = self.api_calls.get(name, 0) + 1
+
     def find_by_selector(self, selector):
-        return []
+        self._count_call('find_by_selector')
+        spans = sorted((b, e) for b, e, scope in self._scopes
+                       if self._selector_matches(scope, selector))
+        merged = []
+        for b, e in spans:
+            if merged and b <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([b, e])
+        return [Region(b, e) for b, e in merged]
 
     def score_selector(self, point, selector):
+        self._count_call('score_selector')
+        for b, e, scope in self._scopes:
+            if b <= point < e and self._selector_matches(scope, selector):
+                return 1
         return 0
 
     def visible_region(self):
         return Region(0, len(self._buf))
+
+    # --- regions ----------------------------------------------------------
+
+    def add_regions(self, key, regions, scope='', icon='', flags=0):
+        self._regions[key] = list(regions)
+
+    def get_regions(self, key):
+        return list(self._regions.get(key, []))
+
+    def erase_regions(self, key):
+        self._regions.pop(key, None)
+
+    def show_at_center(self, point):
+        pass
 
     def show(self, x, show_surrounds=True):
         pass

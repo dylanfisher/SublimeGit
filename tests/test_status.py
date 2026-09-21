@@ -13,6 +13,9 @@ from sgit.status import (GitStatusBarUpdater, GitStatusBuilder, GitStatusCommand
                          GitQuickStatusCommand, GitStatusBarEventListener,
                          GitStatusMoveCmd, GitStatusRefreshCommand, GitStatusWriteCommand,
                          GitStatusEventListener, GitStatusUnstageCommand,
+                         GitStatusDiscardCommand, GitStatusStageCommand,
+                         UNTRACKED_FILES, UNSTAGED_CHANGES,
+                         STAGED_CHANGES,
                          GIT_STATUS_HELP, GIT_STATUS_VIEW_SETTINGS, GIT_STATUS_VIEW_SYNTAX,
                          GIT_STATUS_VIEW_TITLE_PREFIX, GIT_WORKING_DIR_CLEAN,
                          parse_porcelain_v2, format_status_bar_message,
@@ -677,6 +680,52 @@ class TestStatusBuilder(object):
             GIT_WORKING_DIR_CLEAN + '\n'
         )
 
+    def test_build_status_spawns_four_git_processes(self, tmp_repo, tmp_path, monkeypatch):
+        """One status, one config, one log, one stash list -- nothing else."""
+        bare = str(tmp_path / 'remote.git')
+        tmp_repo.git('init', '-q', '--bare', bare)
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.git('remote', 'add', 'origin', bare)
+        tmp_repo.git('push', '-q', '-u', 'origin', 'main')
+        tmp_repo.write('a.txt', 'changed\n')
+        tmp_repo.write('u.txt', 'u\n')
+
+        commands = []
+        original = sgit.cmd.subprocess.Popen
+
+        def recording_popen(args, *a, **kwargs):
+            commands.append(list(args))
+            return original(args, *a, **kwargs)
+
+        monkeypatch.setattr(sgit.cmd.subprocess, 'Popen', recording_popen)
+        status = GitStatusBuilder().build_status(tmp_repo.path)
+
+        subcommands = [c[1 + len(GitCmd.opts)] for c in commands]
+        assert subcommands == ['status', 'config', 'log', 'stash']
+        assert len(commands) == 4
+        assert status.startswith('Remote:   origin @ %s\nLocal:    main %s\n' % (bare, tmp_repo.path))
+
+    def test_branch_and_status_from_one_call(self, tmp_repo, tmp_path):
+        bare = str(tmp_path / 'remote.git')
+        tmp_repo.git('init', '-q', '--bare', bare)
+        tmp_repo.commit('old.txt', 'some content that is long enough\n')
+        tmp_repo.git('remote', 'add', 'origin', bare)
+        tmp_repo.git('push', '-q', '-u', 'origin', 'main')
+        tmp_repo.git('mv', 'old.txt', 'new.txt')
+        assert RealGit().get_branch_and_status(tmp_repo.path) == (
+            'main', 'origin/main', ['R  old.txt -> new.txt'])
+
+    def test_branch_and_status_detached_head(self, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.git('checkout', '-q', '--detach')
+        tmp_repo.write('a.txt', 'changed\n')
+        assert RealGit().get_branch_and_status(tmp_repo.path) == (None, None, [' M a.txt'])
+
+    def test_branch_and_status_unborn_branch(self, tmp_repo):
+        tmp_repo.write('new.txt', 'x\n')
+        assert RealGit().get_branch_and_status(tmp_repo.path) == (
+            'main', None, ['?? new.txt'])
+
     def test_no_stashes_is_empty_string(self, tmp_repo):
         tmp_repo.commit('a.txt', 'a\n')
         assert GitStatusBuilder().build_stashes(tmp_repo.path) == ''
@@ -732,6 +781,70 @@ class TestHelpersAgainstRealGit(object):
         assert len(stashes) == 1
         assert stashes[0][0] == '0'
         assert stashes[0][1].startswith('WIP on main: ')
+
+    def _assert_changes(self, repo, expected):
+        """get_changes must agree with the two diff --quiet calls it replaces,
+        and must do it in a single git process."""
+        g = RealGit()
+        old = (g.has_staged_changes(repo.path), g.has_unstaged_changes(repo.path))
+        assert old == expected
+
+        commands = []
+        original = sgit.cmd.subprocess.Popen
+
+        def recording_popen(args, *a, **kwargs):
+            commands.append(list(args))
+            return original(args, *a, **kwargs)
+
+        try:
+            sgit.cmd.subprocess.Popen = recording_popen
+            assert g.get_changes(repo.path) == expected
+        finally:
+            sgit.cmd.subprocess.Popen = original
+        assert len(commands) == 1
+        assert commands[0][1 + len(GitCmd.opts)] == 'status'
+        assert g.has_changes(repo.path) is any(expected)
+
+    def test_get_changes_clean(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('untracked.txt', 'u\n')  # untracked is not a change
+        self._assert_changes(tmp_repo, (False, False))
+
+    def test_get_changes_staged_only(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'changed\n')
+        tmp_repo.git('add', 'a.txt')
+        self._assert_changes(tmp_repo, (True, False))
+
+    def test_get_changes_unstaged_only(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'changed\n')
+        self._assert_changes(tmp_repo, (False, True))
+
+    def test_get_changes_both(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'staged\n')
+        tmp_repo.git('add', 'a.txt')
+        tmp_repo.write('a.txt', 'and then some more\n')
+        self._assert_changes(tmp_repo, (True, True))
+
+    def test_get_changes_staged_rename(self, settings, tmp_repo):
+        """The original path is a separate -z record and must not be parsed
+        as a status entry of its own."""
+        tmp_repo.commit('old.txt', 'some content that is long enough\n')
+        tmp_repo.git('mv', 'old.txt', 'new.txt')
+        self._assert_changes(tmp_repo, (True, False))
+
+    def test_get_changes_unmerged_conflict(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'base\n')
+        tmp_repo.git('checkout', '-q', '-b', 'other')
+        tmp_repo.commit('a.txt', 'theirs\n', message='theirs')
+        tmp_repo.git('checkout', '-q', 'main')
+        tmp_repo.commit('a.txt', 'ours\n', message='ours')
+        tmp_repo.git('merge', 'other', check=False)
+        assert tmp_repo.git('status', '--porcelain').startswith('UU ')
+        # a conflict is reported by both diff --quiet and diff --quiet --cached
+        self._assert_changes(tmp_repo, (True, True))
 
     def test_git_lines_and_exit_code(self, settings, tmp_repo):
         tmp_repo.commit('a.txt', 'a\n')
@@ -1488,3 +1601,400 @@ class TestUnstageNoCommits(object):
 
         # conftest's git() strips, so the leading ' ' of ' M' is gone
         assert tmp_repo.git('status', '--porcelain') == 'M a.txt'
+
+
+class TestStatusDiscardFiles(object):
+    """``GitStatusDiscardCommand.discard_files`` gathers state in bulk."""
+
+    def discard_cmd(self):
+        return GitStatusDiscardCommand(sublime.View())
+
+    def record_git(self, monkeypatch):
+        commands = []
+        original = sgit.cmd.subprocess.Popen
+
+        def recording_popen(args, *a, **kwargs):
+            commands.append(list(args))
+            return original(args, *a, **kwargs)
+
+        monkeypatch.setattr(sgit.cmd.subprocess, 'Popen', recording_popen)
+        return commands
+
+    def subcommands(self, commands):
+        """The git arguments of each spawned process, with the global opts stripped."""
+        return [c[1 + len(GitCmd.opts):] for c in commands]
+
+    def test_bounded_number_of_diff_processes(self, settings, tmp_repo, monkeypatch):
+        files = []
+        for i in range(6):
+            tmp_repo.commit('mod%d.txt' % i, 'm\n')
+            tmp_repo.commit('stg%d.txt' % i, 's\n')
+        for i in range(6):
+            tmp_repo.write('mod%d.txt' % i, 'changed\n')
+            tmp_repo.write('stg%d.txt' % i, 'staged\n')
+            tmp_repo.git('add', '--', 'stg%d.txt' % i)
+            tmp_repo.write('unt%d.txt' % i, 'u\n')
+            files.append((UNSTAGED_CHANGES, 'mod%d.txt' % i))
+            files.append((STAGED_CHANGES, 'stg%d.txt' % i))
+            files.append((UNTRACKED_FILES, 'unt%d.txt' % i))
+
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, files)
+
+        diffs = [c for c in self.subcommands(commands) if c[0] == 'diff']
+        assert len(diffs) == 2
+        assert diffs[0] == ['diff', '--name-status', '--cached', '-z', '--'] + \
+            ['stg%d.txt' % i for i in range(6)]
+        assert diffs[1] == ['diff', '--name-status', '-z', '--'] + \
+            [f for _, f in files if f.startswith(('mod', 'stg'))]
+        assert tmp_repo.git('status', '--porcelain') == ''
+
+    def test_modified_file_is_discarded(self, settings, tmp_repo, monkeypatch):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'changed\n')
+
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, [(UNSTAGED_CHANGES, 'a.txt')])
+
+        assert sublime.ok_cancel_dialogs == [
+            ("Are you sure you want to perform the following actions?\n\n"
+             "  Discard:  a.txt", 'Continue')]
+        assert self.subcommands(commands)[1:] == [['checkout', '--', 'a.txt']]
+        assert open(os.path.join(tmp_repo.path, 'a.txt')).read() == 'a\n'
+
+    def test_deleted_file_is_resurrected(self, settings, tmp_repo, monkeypatch):
+        tmp_repo.commit('a.txt', 'a\n')
+        os.unlink(os.path.join(tmp_repo.path, 'a.txt'))
+
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, [(UNSTAGED_CHANGES, 'a.txt')])
+
+        assert sublime.ok_cancel_dialogs == [
+            ("Are you sure you want to perform the following actions?\n\n"
+             "  Resurrect:  a.txt", 'Continue')]
+        assert self.subcommands(commands)[1:] == [
+            ['reset', '-q', '--', 'a.txt'],
+            ['checkout', '--', 'a.txt']]
+        assert open(os.path.join(tmp_repo.path, 'a.txt')).read() == 'a\n'
+
+    def test_staged_and_up_to_date_file_is_discarded(self, settings, tmp_repo, monkeypatch):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'changed\n')
+        tmp_repo.git('add', '--', 'a.txt')
+
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, [(STAGED_CHANGES, 'a.txt')])
+
+        assert sublime.ok_cancel_dialogs == [
+            ("Are you sure you want to perform the following actions?\n\n"
+             "  Discard:  a.txt", 'Continue')]
+        assert self.subcommands(commands)[2:] == [['checkout', 'HEAD', '--', 'a.txt']]
+        assert tmp_repo.git('status', '--porcelain') == ''
+
+    def test_staged_but_not_up_to_date_is_an_error(self, settings, tmp_repo, monkeypatch):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'staged\n')
+        tmp_repo.git('add', '--', 'a.txt')
+        tmp_repo.write('a.txt', 'and then modified\n')
+
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, [(STAGED_CHANGES, 'a.txt')])
+
+        assert sublime.error_messages == [
+            "You can't discard staged changes to the following files. "
+            "Please unstage them first:\n\n  a.txt"]
+        assert sublime.ok_cancel_dialogs == []
+        # only the two bulk diffs, no actions
+        assert len(commands) == 2
+        assert open(os.path.join(tmp_repo.path, 'a.txt')).read() == 'and then modified\n'
+
+    def test_untracked_file_is_deleted(self, settings, tmp_repo, monkeypatch):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('u.txt', 'u\n')
+
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, [(UNTRACKED_FILES, 'u.txt')])
+
+        assert sublime.ok_cancel_dialogs == [
+            ("Are you sure you want to perform the following actions?\n\n"
+             "  Delete:  u.txt", 'Continue')]
+        # untracked files need neither diff
+        assert self.subcommands(commands) == [['clean', '-d', '--force', '--', 'u.txt']]
+        assert not os.path.exists(os.path.join(tmp_repo.path, 'u.txt'))
+
+    def test_path_with_a_space(self, settings, tmp_repo, monkeypatch):
+        tmp_repo.commit('a file.txt', 'a\n')
+        tmp_repo.write('a file.txt', 'changed\n')
+        tmp_repo.write('an untracked file.txt', 'u\n')
+
+        self.discard_cmd().discard_files(tmp_repo.path, [
+            (UNSTAGED_CHANGES, 'a file.txt'),
+            (UNTRACKED_FILES, 'an untracked file.txt')])
+
+        assert sublime.ok_cancel_dialogs == [
+            ("Are you sure you want to perform the following actions?\n\n"
+             "  Discard:  a file.txt\n"
+             "  Delete:  an untracked file.txt", 'Continue')]
+        assert tmp_repo.git('status', '--porcelain') == ''
+        assert open(os.path.join(tmp_repo.path, 'a file.txt')).read() == 'a\n'
+
+    def test_cancelling_the_confirmation_does_nothing(self, settings, tmp_repo, monkeypatch):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'changed\n')
+        sublime.ok_cancel_answers.append(False)
+
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, [(UNSTAGED_CHANGES, 'a.txt')])
+
+        assert len(commands) == 1
+        assert open(os.path.join(tmp_repo.path, 'a.txt')).read() == 'changed\n'
+
+    def test_empty_file_list_runs_no_git_at_all(self, settings, tmp_repo, monkeypatch):
+        commands = self.record_git(monkeypatch)
+        self.discard_cmd().discard_files(tmp_repo.path, [])
+        assert commands == []
+        assert sublime.ok_cancel_dialogs == []
+
+
+# --- status view scopes ---------------------------------------------------
+#
+# The stub view has no syntax, so these tests hand it the scope spans that
+# ``syntax/SublimeGit Status.sublime-syntax`` would produce: a section block
+# (``meta.git-status.<section>``) runs from its header line through the blank
+# line that terminates it, and inside it every item line is
+# ``meta.git-status.line`` with a ``meta.git-status.file`` (or
+# ``meta.git-status.stash.name``) capture.
+
+SECTION_BY_HEADER = {
+    'Stashes:': sgit.status.STASHES,
+    'Untracked files:': UNTRACKED_FILES,
+    # "Changes:" replaces "Unstaged changes:" when nothing is staged; the
+    # syntax scopes both as unstaged_changes.
+    'Changes:': UNSTAGED_CHANGES,
+    'Unstaged changes:': UNSTAGED_CHANGES,
+    'Staged changes:': STAGED_CHANGES,
+}
+
+
+def status_scopes(content):
+    """Scope spans for a status buffer, mirroring the .sublime-syntax."""
+    import re
+    scopes = []
+    section, section_start, pos = None, 0, 0
+
+    for line in content.splitlines(True):
+        text = line.rstrip('\n')
+        end = pos + len(line)
+
+        if section is None:
+            if text == '# Movement:':
+                scopes.append((pos, len(content), 'comment.git-status.help'))
+                break
+            if text in SECTION_BY_HEADER:
+                section = SECTION_BY_HEADER[text]
+                section_start = pos
+                scopes.append((pos, end, 'constant.other.git-status.header'))
+        elif text == '':
+            # the blank line terminates the section and belongs to it
+            scopes.append((section_start, end, 'meta.git-status.' + section))
+            section = None
+        elif line.startswith('\t'):
+            scopes.append((pos, end, 'meta.git-status.line'))
+            if section == sgit.status.STASHES:
+                m = re.match(r'\t(.+?): (?:WIP )?[oO]n (.+): (.+)$', text)
+                if m:
+                    scopes.append((pos + m.start(1), pos + m.end(1),
+                                   'meta.git-status.stash.name'))
+            elif section == UNTRACKED_FILES:
+                scopes.append((pos + 1, pos + len(text), 'meta.git-status.file'))
+            else:
+                m = re.match(r'\t(\w+) *(.+)$', text)
+                if m:
+                    scopes.append((pos + m.start(2), pos + m.end(2),
+                                   'meta.git-status.file'))
+        pos = end
+
+    if section is not None:
+        scopes.append((section_start, len(content), 'meta.git-status.' + section))
+    return scopes
+
+
+def scoped_status_view(content):
+    view = sublime.View(settings={'git_view': 'status'}, content=content)
+    view.set_scopes(status_scopes(content))
+    return view
+
+
+def move_cmd(content):
+    cmd = GitStatusMoveCmd()
+    cmd.view = scoped_status_view(content)
+    return cmd
+
+
+def caret_line(cmd):
+    point = cmd.view.sel()[0].begin()
+    return cmd.view.substr(cmd.view.line(point))
+
+
+FULL_STATUS = (
+    "Local:    main ~/repo\n"
+    "Head:     abc1234 initial\n"
+    "\n"
+    "Stashes:\n"
+    "\t0: WIP on main: abc1234 initial\n"
+    "\n"
+    "Untracked files:\n"
+    "\tbeta.txt\n"
+    "\tdelta.txt\n"
+    "\tzeta.txt\n"
+    "\n"
+    "Unstaged changes:\n"
+    "\tModified   a.txt\n"
+    "\tDeleted    b.txt\n"
+    "\n"
+    "Staged changes:\n"
+    "\tAdded      c.txt\n"
+    "\n"
+) + GIT_STATUS_HELP
+
+
+def brute_force_section_at_point(view, point):
+    """The pre-bisect implementation: one score_selector per section."""
+    for s in sgit.status.SECTIONS:
+        if view.score_selector(point, sgit.status.SECTION_SELECTOR_PREFIX + s) > 0:
+            return s
+    return None
+
+
+class TestSectionAtPoint(object):
+
+    def test_agrees_with_scoring_every_point(self):
+        cmd = move_cmd(FULL_STATUS)
+        mismatches = [p for p in range(cmd.view.size() + 1)
+                      if cmd.section_at_point(p) != brute_force_section_at_point(cmd.view, p)]
+        assert mismatches == []
+
+    def test_sections_are_found_at_all(self):
+        cmd = move_cmd(FULL_STATUS)
+        found = set(s for _, _, s in cmd.get_section_regions())
+        assert found == set([sgit.status.STASHES, UNTRACKED_FILES,
+                             UNSTAGED_CHANGES, STAGED_CHANGES])
+
+    def test_header_and_help_lines_are_outside_any_section(self):
+        cmd = move_cmd(FULL_STATUS)
+        assert cmd.section_at_point(0) is None
+        assert cmd.section_at_point(cmd.view.size() - 1) is None
+
+    def test_changes_pseudo_section_is_reported_as_unstaged(self):
+        cmd = move_cmd("Changes:\n\tModified   a.txt\n\n")
+        point = cmd.view.text_point(1, 2)
+        assert cmd.section_at_point(point) == UNSTAGED_CHANGES
+        assert cmd.get_all_files() == [(UNSTAGED_CHANGES, 'a.txt')]
+
+    def test_empty_view_has_no_sections(self):
+        cmd = move_cmd('')
+        assert cmd.get_section_regions() == []
+        assert cmd.section_at_point(0) is None
+
+    def test_cache_is_invalidated_when_the_buffer_changes(self):
+        cmd = move_cmd(FULL_STATUS)
+        assert cmd.section_at_point(cmd.view.text_point(7, 2)) == UNTRACKED_FILES
+
+        content = "Staged changes:\n\tAdded      c.txt\n\n"
+        cmd.view.replace(None, sublime.Region(0, cmd.view.size()), content)
+        cmd.view.set_scopes(status_scopes(content))
+
+        assert cmd.section_at_point(cmd.view.text_point(1, 2)) == STAGED_CHANGES
+
+
+class TestMoveToFileInSection(object):
+
+    def test_lands_on_the_next_file_by_name(self):
+        cmd = move_cmd(FULL_STATUS)
+        cmd.move_to_file('delta.txt', UNTRACKED_FILES)
+        assert caret_line(cmd) == '\tdelta.txt'
+
+    def test_lands_on_the_next_name_when_the_file_is_gone(self):
+        cmd = move_cmd(FULL_STATUS)
+        cmd.move_to_file('cee.txt', UNTRACKED_FILES)
+        assert caret_line(cmd) == '\tdelta.txt'
+
+    def test_lands_on_the_last_file_when_past_the_end(self):
+        cmd = move_cmd(FULL_STATUS)
+        cmd.move_to_file('zzz.txt', UNTRACKED_FILES)
+        assert caret_line(cmd) == '\tzeta.txt'
+
+    def test_only_looks_in_the_given_section(self):
+        cmd = move_cmd(FULL_STATUS)
+        cmd.move_to_file('a.txt', STAGED_CHANGES)
+        assert caret_line(cmd) == '\tAdded      c.txt'
+
+    def test_falls_back_to_the_previous_section_when_the_section_is_gone(self):
+        # the untracked section was emptied by staging its last file
+        content = FULL_STATUS.replace("Untracked files:\n\tbeta.txt\n\tdelta.txt\n\tzeta.txt\n\n", "")
+        cmd = move_cmd(content)
+        cmd.move_to_file('beta.txt', UNTRACKED_FILES)
+        # nothing before untracked_files holds files, so: first file
+        assert caret_line(cmd) == '\tModified   a.txt'
+
+    def test_falls_back_to_the_last_file_of_an_earlier_section(self):
+        content = FULL_STATUS.replace("Staged changes:\n\tAdded      c.txt\n\n", "")
+        cmd = move_cmd(content)
+        cmd.move_to_file('c.txt', STAGED_CHANGES)
+        assert caret_line(cmd) == '\tDeleted    b.txt'
+
+    def test_renamed_file_selection_reports_both_names(self):
+        content = ("Staged changes:\n"
+                   "\tRenamed    old.txt -> new.txt\n"
+                   "\n")
+        cmd = move_cmd(content)
+        cmd.view.sel().clear()
+        cmd.view.sel().add(sublime.Region(cmd.view.text_point(1, 2)))
+        assert cmd.get_selected_files() == [(STAGED_CHANGES, 'old.txt'),
+                                            (STAGED_CHANGES, 'new.txt')]
+
+    def test_move_to_section_by_name(self):
+        cmd = move_cmd(FULL_STATUS)
+        cmd.move_to_section(UNSTAGED_CHANGES)
+        assert caret_line(cmd) == 'Unstaged changes:'
+
+
+class TestStatusNavigationApiCalls(object):
+    """Navigation must not scale its Sublime API calls with the file count."""
+
+    def big_status(self, count=500):
+        files = ''.join('\t%04d.txt\n' % i for i in range(count))
+        return ("Local:    main ~/repo\n"
+                "\n"
+                "Untracked files:\n" + files + "\n") + GIT_STATUS_HELP
+
+    def test_move_to_file_is_bounded(self):
+        cmd = move_cmd(self.big_status())
+        cmd.view.api_calls.clear()
+
+        cmd.move_to_file('0250.txt', UNTRACKED_FILES)
+
+        assert caret_line(cmd) == '\t0250.txt'
+        assert sum(cmd.view.api_calls.values()) < 20
+
+    def test_logical_goto_next_file_is_bounded(self):
+        cmd = GitStatusStageCommand(scoped_status_view(self.big_status()))
+        cmd.view.sel().clear()
+        cmd.view.sel().add(sublime.Region(cmd.view.text_point(5, 2)))
+        cmd.view.api_calls.clear()
+
+        goto = cmd.logical_goto_next_file()
+
+        assert goto == 'file:0002.txt:%s' % UNTRACKED_FILES
+        assert sum(cmd.view.api_calls.values()) < 20
+
+    def test_get_all_files_is_bounded(self):
+        cmd = move_cmd(self.big_status())
+        cmd.view.api_calls.clear()
+
+        files = cmd.get_all_files()
+
+        assert len(files) == 500
+        assert files[0] == (UNTRACKED_FILES, '0000.txt')
+        assert files[-1] == (UNTRACKED_FILES, '0499.txt')
+        assert sum(cmd.view.api_calls.values()) < 20

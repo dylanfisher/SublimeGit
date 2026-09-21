@@ -1,4 +1,5 @@
 import os
+import bisect
 import logging
 import threading
 import time
@@ -96,9 +97,11 @@ GIT_STATUS_HELP = """
 class GitStatusBuilder(GitCmd, GitStatusHelper, GitRemoteHelper, GitStashHelper):
 
     def build_status(self, repo):
-        branch = self.get_current_branch(repo)
-        remote = self.get_branch_remote(repo, branch)
-        remote_url = self.get_remote_url(repo, remote)
+        # One `git status --porcelain=v2 --branch` gives the branch, its
+        # upstream and the file status; the remote name and url come from a
+        # single `git config --get-regexp`.
+        branch, upstream, status_lines = self.get_branch_and_status(repo)
+        remote, remote_url = self.get_remote_and_url(repo, branch)
 
         abbrev_dir = abbreviate_dir(repo)
 
@@ -111,11 +114,11 @@ class GitStatusBuilder(GitCmd, GitStatusHelper, GitRemoteHelper, GitStashHelper)
         status += "Head:     %s\n" % ("nothing committed (yet)" if head_rc != 0 else head)
         status += "\n"
 
-        # update index
-        self.git_exit_code(['update-index', '--refresh'], cwd=repo)
+        # no `update-index --refresh` here: the status call above already
+        # refreshed the index and wrote it back
 
         status += self.build_stashes(repo)
-        status += self.build_files_status(repo)
+        status += self.build_files_status(repo, status_lines)
 
         if get_setting('git_show_status_help', True):
             status += GIT_STATUS_HELP
@@ -134,10 +137,10 @@ class GitStatusBuilder(GitCmd, GitStatusHelper, GitRemoteHelper, GitStashHelper)
 
         return status
 
-    def build_files_status(self, repo):
-        # get status
+    def build_files_status(self, repo, status_lines=None):
+        # get status (``status_lines`` reuses an already fetched status)
         status = ""
-        untracked, unstaged, staged = self.get_files_status(repo)
+        untracked, unstaged, staged = self.get_files_status(repo, status_lines)
 
         if not untracked and not unstaged and not staged:
             status += GIT_WORKING_DIR_CLEAN + "\n"
@@ -223,7 +226,10 @@ class GitStatusTextCmd(GitCmd):
 
     def get_all_files(self):
         files = self.get_all_file_regions()
-        return [(self.section_at_region(f), self.view.substr(f)) for f in files]
+        # find_by_selector() returns sorted, non-overlapping regions, so one
+        # substr() covers them all instead of one API call per file.
+        return list(zip((self.section_at_region(f) for f in files),
+                        self.regions_text(files)))
 
     def get_selected_file_regions(self):
         files = []
@@ -267,13 +273,58 @@ class GitStatusTextCmd(GitCmd):
         sections = self.view.find_by_selector('constant.other.git-status.header')
         return sections
 
+    def get_section_regions(self):
+        """``[(begin, end, section)]`` for every section block, sorted by begin.
+
+        ``meta.git-status.<section>`` is the meta_scope of a whole section
+        block, so one ``find_by_selector`` per section gives every block in a
+        single native call instead of scoring each point separately.
+
+        The result is cached on the command instance (TextCommand instances
+        are reused across runs) and keyed by ``view.change_count()``, which
+        only moves when ``git_status_write`` rewrites the buffer.
+        """
+        view = self.view
+        change_count = getattr(view, 'change_count', None)
+        key = (view.id(), change_count() if change_count is not None else None)
+
+        cached = getattr(self, '_section_regions_cache', None)
+        if cached is not None and cached[0] == key and key[1] is not None:
+            return cached[1]
+
+        regions = []
+        for section in SECTION_ORDER:
+            # No `meta.git-status.changes` scope exists: the CHANGES
+            # pseudo-section header is scoped as unstaged_changes.
+            for r in view.find_by_selector(SECTION_SELECTOR_PREFIX + section):
+                regions.append((r.begin(), r.end(), section))
+        regions.sort()
+
+        self._section_regions_cache = (key, regions)
+        return regions
+
     def section_at_point(self, point):
-        for s in SECTIONS:
-            if self.view.score_selector(point, SECTION_SELECTOR_PREFIX + s) > 0:
-                return s
+        regions = self.get_section_regions()
+        if not regions:
+            return None
+        idx = bisect.bisect_right(regions, (point, float('inf'))) - 1
+        if idx < 0:
+            return None
+        begin, end, section = regions[idx]
+        if begin <= point < end:
+            return section
+        return None
 
     def section_at_region(self, region):
         return self.section_at_point(region.begin())
+
+    def regions_text(self, regions):
+        """The text of ``regions`` (sorted, non-overlapping) in one substr."""
+        if not regions:
+            return []
+        start = regions[0].begin()
+        covering = self.view.substr(sublime.Region(start, regions[-1].end()))
+        return [covering[r.begin() - start:r.end() - start] for r in regions]
 
     # goto helpers
     def logical_goto_next_file(self):
@@ -427,24 +478,27 @@ class GitStatusMoveCmd(GitStatusTextCmd):
                 self.move_to_region(next)
         elif which and where:
             regions = self.get_all_file_regions()
-            section_regions = [r for r in regions if self.section_at_region(r) == where]
+            by_section = {}
+            for r in regions:
+                by_section.setdefault(self.section_at_region(r), []).append(r)
+
+            section_regions = by_section.get(where)
             if section_regions:
-                prev_regions = [r for r in section_regions if self.view.substr(r) < which]
-                next_regions = [r for r in section_regions if self.view.substr(r) >= which]
-                if next_regions:
-                    next = next_regions[0]
-                else:
-                    next = prev_regions[-1]
+                # One substr for the whole section instead of two per file.
+                names = self.regions_text(section_regions)
+                next = section_regions[-1]
+                for region, name in zip(section_regions, names):
+                    if name >= which:
+                        next = region
+                        break
                 self.move_to_region(next)
             else:
-                sections = set([self.section_at_region(r) for r in regions])
                 idx = SECTION_ORDER.index(where)
                 while idx > 0:
                     idx -= 1
                     section = SECTION_ORDER[idx]
-                    if section in sections:
-                        section_regions = [r for r in regions if self.section_at_region(r) == section]
-                        self.move_to_region(section_regions[-1])
+                    if section in by_section:
+                        self.move_to_region(by_section[section][-1])
                         return
                 self.move_to_file(1)
 
@@ -1387,11 +1441,20 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
                 self.git(['stash', 'drop', '--quiet', 'stash@{%s}' % n], cwd=repo)
 
     def discard_files(self, repo, files):
+        # Gather the state of every selected file up front, with a constant
+        # number of git calls, and reuse it for both the confirmation dialog
+        # and the actions below.
+        staged_paths = [f for s, f in files if s == STAGED_CHANGES]
+        worktree_paths = [f for s, f in files if s in (STAGED_CHANGES, UNSTAGED_CHANGES)]
+
+        staging_statuses = self.get_staging_statuses(repo, staged_paths)
+        worktree_statuses = self.get_worktree_statuses(repo, worktree_paths)
+
         # See if any of the files cannot be discarded
         error = "You can't discard staged changes to the following files. Please unstage them first:\n\n  {errfiles}"
         errlist = []
         for s, f in files:
-            if s == STAGED_CHANGES and not self.is_up_to_date(repo, f):
+            if s == STAGED_CHANGES and f in worktree_statuses:
                 errlist.append(f)
 
         if errlist:
@@ -1404,7 +1467,7 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
         actionlist = []
         for s, f in files:
             staged = s == STAGED_CHANGES
-            status = self.get_staging_status(repo, f) if staged else self.get_worktree_status(repo, f)
+            status = staging_statuses.get(f) if staged else worktree_statuses.get(f)
 
             if staged and f in errlist:
                 continue
@@ -1428,9 +1491,9 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
         # perform various unstaging/deleting/resurrection actions
         for s, f in files:
             staged = s == STAGED_CHANGES
-            status = self.get_staging_status(repo, f) if staged else self.get_worktree_status(repo, f)
+            status = staging_statuses.get(f) if staged else worktree_statuses.get(f)
 
-            if staged and not self.is_up_to_date(repo, f):
+            if staged and f in worktree_statuses:
                 continue
 
             if s == UNTRACKED_FILES:
@@ -1445,6 +1508,56 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
                     self.git(['checkout', 'HEAD', '--', f], cwd=repo)
                 else:
                     self.git(['checkout', '--', f], cwd=repo)
+
+    # bulk status helpers
+
+    def parse_name_status_z(self, output):
+        """Parse ``git diff --name-status -z`` output into {path: status letter}.
+
+        The output is a flat NUL-separated list of ``STATUS\0path\0``, except
+        for renames/copies which emit ``R100\0old\0new\0``.
+        """
+        statuses = {}
+        fields = output.split('\0') if output else []
+        i = 0
+        while i < len(fields):
+            status = fields[i]
+            if not status:
+                i += 1
+                continue
+            letter = status[0]
+            if letter in ('R', 'C'):
+                if i + 2 >= len(fields):
+                    break
+                statuses[fields[i + 1]] = letter
+                statuses[fields[i + 2]] = letter
+                i += 3
+            else:
+                if i + 1 >= len(fields):
+                    break
+                statuses[fields[i + 1]] = letter
+                i += 2
+        return statuses
+
+    def get_worktree_statuses(self, repo, paths):
+        """Worktree (vs. index) status of each of ``paths``, in one git call.
+
+        Paths missing from the result are unchanged in the worktree, i.e. they
+        are "up to date".
+        """
+        if not paths:
+            return {}
+        output = self.git_string(['diff', '--name-status', '-z', '--'] + list(paths),
+                                 cwd=repo, strip=False)
+        return self.parse_name_status_z(output)
+
+    def get_staging_statuses(self, repo, paths):
+        """Staged (index vs. HEAD) status of each of ``paths``, in one git call."""
+        if not paths:
+            return {}
+        output = self.git_string(['diff', '--name-status', '--cached', '-z', '--'] + list(paths),
+                                 cwd=repo, strip=False)
+        return self.parse_name_status_z(output)
 
     # status helpers
 
