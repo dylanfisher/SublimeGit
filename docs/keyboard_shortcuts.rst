@@ -38,6 +38,11 @@ Stashes
 * ``z``: Create stash from worktree
 
 
+Log View
+--------
+* ``enter``: Show the selected commit(s)
+* ``r``: Refresh the log
+
 Blame View
 ----------
 * ``enter``: Show the selected commit(s)

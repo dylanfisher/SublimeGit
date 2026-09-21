@@ -1,5 +1,17 @@
 [
-    /*** GIT LOG ***/
+    /*** GIT LOG (graph view) ***/
+
+    // Show command
+    { "keys": ["enter"], "command": "git_log_graph_show",
+        "context": [{ "key": "selector", "operator": "equal", "operand": "meta.git-log.line" }]
+    },
+
+    // Refresh
+    { "keys": ["r"], "command": "git_log_graph_refresh",
+        "context": [{ "key": "selector", "operator": "equal", "operand": "text.git-log" }]
+    },
+
+    /*** GIT LOG (current file) ***/
 
     // Refresh
     { "keys": ["r"], "command": "git_log_refresh",

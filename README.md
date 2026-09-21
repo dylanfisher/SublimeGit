@@ -78,6 +78,12 @@ The summary:
   when not fully merged), `Git: Delete Merged Branches` (every local branch merged into a chosen target), and
   `Git: Log Current File` (a `*git-log*` view of `git log --follow --patch`,
   refreshed with `r`).
+- `Git: Log` opens a `*git-log*` graph view of the repository history
+  (`git log --graph --decorate`, one commit per line with hash, relative
+  date, subject, author and refs, highlighted by its own syntax) instead of
+  forwarding to the quick panel. `enter` opens the selected commit(s) in
+  `*git-show*` views, `r` refreshes. The quick panel is still available as
+  `Git: Quick Log`.
 - `Git: Fetch`, `Git: Pull` and `Git: Pull Current Branch` pass `--prune`
   unless the new `git_fetch_prune` setting is false. Remote lists put `origin`
   and `upstream` first. A repository with a single remote no longer shows the
@@ -146,7 +152,7 @@ Bugs (In no particular order):
 **1.1.0**
 
 Planned Features:
- - `Git: Log` view. (See below)
+ - `Git: Log` view. (See below; the graph view with `enter`/`r` is implemented in this fork)
  - `Git: Branch` view. (See below)
  - Add unpushed commits to status view.
  - Hub integration. (Issue #30)

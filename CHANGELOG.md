@@ -6,6 +6,34 @@ newest first. Upstream's own release notes (the old Package Control
 `messages/` files) were removed; the original documentation at
 <https://sublimegit.readthedocs.io/en/latest/> still applies.
 
+## Add a graph log view
+
+### Added
+
+- `Git: Log` now opens a `*git-log*: <repo>` view with the output of
+  `git log --graph --abbrev-commit --decorate --date=relative` formatted as
+  `<hash> - (<relative date>) <subject> - <author><refs>`. The log is
+  gathered off the UI thread like the status and diff views. `enter` opens
+  the commit(s) on the selected lines in `*git-show*` views (with the usual
+  warning above 5 tabs, governed by `git_blame_warn_multiple_tabs`), `r`
+  refreshes while keeping the caret and scroll position. A repository
+  without commits shows `No commits yet` instead of a git error.
+- New `SublimeGit Log.sublime-syntax` (`text.git-log`) scoping the graph
+  (`comment.other.git-log.graph`), hash (`entity.other.git-log.hex`), date
+  (`comment.other.git-log.date`), author (`support.type.git-log.author`) and
+  refs (`string.other.git-log.refs`) of each `meta.git-log.line`, with a
+  syntax test in `syntax/tests/syntax_test_git_log.txt`.
+- `tests/test_log.py` covers the graph view: line parsing, refresh
+  (including the empty-repository and caret/viewport cases), `enter` on
+  single and multiple lines, the tab-count warning and view cleanup.
+- Keymap: `enter` and `r` are bound in the graph view; `docs/keyboard_shortcuts.rst`
+  gains a "Log View" section.
+
+### Changed
+
+- `Git: Log` no longer forwards to the quick panel; use `Git: Quick Log`
+  for that.
+
 ## Distinguish staged, unstaged and untracked files in the status and commit views
 
 ### Changed

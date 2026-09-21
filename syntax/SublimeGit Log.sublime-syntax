@@ -1,0 +1,32 @@
+%YAML 1.2
+---
+# Syntax for the *git-log* graph view built by sgit/log.py (GitLogCommand):
+#   {graph}{hash} - ({relative date}) {subject} - {author}{ (refs)}
+# Lines that only carry graph glyphs (merge legs) have no hash.
+name: SublimeGit Log
+scope: text.git-log
+version: 2
+hidden: true
+file_extensions:
+  - git-log
+
+variables:
+  graph: '[ |/\\_*.-]'
+
+contexts:
+  main:
+    - match: '^({{graph}}*?)([0-9a-f]{7,40}) (-) (\()([^)]*)(\)) (.*) (-) ([^()]*?)( \(.*\))?$'
+      scope: meta.git-log.line
+      captures:
+        1: comment.other.git-log.graph
+        2: entity.other.git-log.hex
+        3: comment.other.git-log.separator
+        4: comment.other.git-log.paren
+        5: comment.other.git-log.date
+        6: comment.other.git-log.paren
+        7: text.git-log.subject
+        8: comment.other.git-log.separator
+        9: support.type.git-log.author
+        10: string.other.git-log.refs
+    - match: '^{{graph}}+$'
+      scope: comment.other.git-log.graph

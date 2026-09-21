@@ -1,0 +1,40 @@
+; SYNTAX TEST "Packages/SublimeGit/syntax/SublimeGit Log.sublime-syntax"
+* 32f3e53 - (2 minutes ago) Distinguish files in the status view - dylanfisher (HEAD -> main, origin/main)
+;<- text.git-log meta.git-log.line comment.other.git-log.graph
+; ^^^^^^^ meta.git-log.line entity.other.git-log.hex
+;         ^ meta.git-log.line comment.other.git-log.separator
+;           ^ meta.git-log.line comment.other.git-log.paren
+;            ^^^^^^^^^^^^^ meta.git-log.line comment.other.git-log.date
+;                         ^ meta.git-log.line comment.other.git-log.paren
+;                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-log.line text.git-log.subject
+;                                                                ^ meta.git-log.line comment.other.git-log.separator
+;                                                                  ^^^^^^^^^^^ meta.git-log.line support.type.git-log.author
+;                                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-log.line string.other.git-log.refs
+| * 2f14206 - (17 minutes ago) Add rebase - abort - undo - Ann Author
+;<- text.git-log meta.git-log.line comment.other.git-log.graph
+;   ^^^^^^^ meta.git-log.line entity.other.git-log.hex
+;           ^ meta.git-log.line comment.other.git-log.separator
+;             ^ meta.git-log.line comment.other.git-log.paren
+;              ^^^^^^^^^^^^^^ meta.git-log.line comment.other.git-log.date
+;                            ^ meta.git-log.line comment.other.git-log.paren
+;                              ^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-log.line text.git-log.subject
+;                                                        ^ meta.git-log.line comment.other.git-log.separator
+;                                                          ^^^^^^^^^^ meta.git-log.line support.type.git-log.author
+;                                                                    ^ meta.git-log.line - string.other.git-log.refs
+|/  
+;<- text.git-log comment.other.git-log.graph - meta.git-log.line
+;^^^ comment.other.git-log.graph - meta.git-log.line
+|\  
+;<- text.git-log comment.other.git-log.graph - meta.git-log.line
+;^^^ comment.other.git-log.graph - meta.git-log.line
+*   a1b2c3d - (3 hours ago) Merge branch 'a' - twice - Bob Builder (tag: v1.0)
+;<- text.git-log meta.git-log.line comment.other.git-log.graph
+;   ^^^^^^^ meta.git-log.line entity.other.git-log.hex
+;           ^ meta.git-log.line comment.other.git-log.separator
+;             ^ meta.git-log.line comment.other.git-log.paren
+;              ^^^^^^^^^^^ meta.git-log.line comment.other.git-log.date
+;                         ^ meta.git-log.line comment.other.git-log.paren
+;                           ^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-log.line text.git-log.subject
+;                                                    ^ meta.git-log.line comment.other.git-log.separator
+;                                                      ^^^^^^^^^^^ meta.git-log.line support.type.git-log.author
+;                                                                 ^^^^^^^^^^^^ meta.git-log.line string.other.git-log.refs
