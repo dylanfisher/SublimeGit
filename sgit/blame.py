@@ -227,6 +227,10 @@ class GitBlameRefreshCommand(TextCommand, GitCmd):
 class GitBlameEventListener(EventListener):
     _lpop = False
 
+    def on_pre_close(self, view):
+        GitBlameCache.commits.pop(view.id(), None)
+        GitBlameCache.lines.pop(view.id(), None)
+
     def on_selection_modified(self, view):
         if view.settings().get('git_view') == 'blame':
             commits = GitBlameCache.commits.get(view.id())

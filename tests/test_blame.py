@@ -1,7 +1,6 @@
 # coding: utf-8
 from datetime import datetime
 
-import pytest
 import sublime
 
 from conftest import requires_git
@@ -119,17 +118,13 @@ class TestBlameRefreshCommand(object):
         GitBlameEventListener().on_selection_modified(view)
         assert sublime.status_messages == []
 
-    @pytest.mark.xfail(strict=True, raises=AttributeError, reason=(
-        'GitBlameEventListener has no on_close hook, so GitBlameCache grows for '
-        'the lifetime of the process. Refactor (e) adds the cleanup; when it '
-        'lands this test should pass and the xfail marker must be removed.'))
     def test_closing_a_blame_view_drops_its_cache_entries(self, settings, tmp_repo):
         tmp_repo.commit('f.txt', 'one\n', message='first')
         view = self.blame_view(tmp_repo)
         GitBlameRefreshCommand(view).run(None)
         assert view.id() in GitBlameCache.commits
 
-        GitBlameEventListener().on_close(view)
+        GitBlameEventListener().on_pre_close(view)
 
         assert view.id() not in GitBlameCache.commits
         assert view.id() not in GitBlameCache.lines

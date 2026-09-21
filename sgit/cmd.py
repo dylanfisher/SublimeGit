@@ -95,14 +95,12 @@ class Cmd(object):
             if stdin and hasattr(stdin, 'encode'):
                 stdin = stdin.encode(encoding)
 
-            if cwd:
-                os.chdir(cwd)
-
             proc = subprocess.Popen(command,
                                     stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
                                     startupinfo=self.startupinfo(),
+                                    cwd=cwd or None,
                                     env=environment)
             stdout, stderr = proc.communicate(stdin)
 
@@ -111,12 +109,12 @@ class Cmd(object):
             return (proc.returncode, self.decode(stdout, encoding, fallback), self.decode(stderr, encoding, fallback))
         except OSError as e:
             if ignore_errors:
-                return (0, '')
+                return (0, '', '')
             sublime.error_message(self.get_executable_error())
             raise SublimeGitException("Could not execute command: %s" % e)
         except UnicodeDecodeError as e:
             if ignore_errors:
-                return (0, '')
+                return (0, '', '')
             sublime.error_message(self.get_decoding_error(encoding, fallback))
             raise SublimeGitException("Could not execute command: %s" % command)
 
@@ -131,13 +129,11 @@ class Cmd(object):
             try:
                 logger.debug('async-cmd: %s', cmd)
 
-                if cwd:
-                    os.chdir(cwd)
-
                 proc = subprocess.Popen(cmd,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT,
                                         startupinfo=self.startupinfo(),
+                                        cwd=cwd or None,
                                         env=environment)
 
                 for line in iter(proc.stdout.readline, b''):

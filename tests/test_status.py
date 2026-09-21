@@ -8,7 +8,7 @@ import sublime
 from conftest import requires_git, GIT
 from sgit.status import (GitStatusBarUpdater, GitStatusBuilder, GitStatusCommand,
                          GitQuickStatusCommand, GitStatusBarEventListener,
-                         GitStatusMoveCmd, GitStatusRefreshCommand,
+                         GitStatusMoveCmd, GitStatusRefreshCommand, GitStatusUnstageCommand,
                          GIT_STATUS_HELP, GIT_STATUS_VIEW_SETTINGS, GIT_STATUS_VIEW_SYNTAX,
                          GIT_STATUS_VIEW_TITLE_PREFIX, GIT_WORKING_DIR_CLEAN)
 from sgit.diff import GitDiffRefreshCommand, GIT_DIFF_CLEAN, GIT_DIFF_CLEAN_CACHED
@@ -607,3 +607,61 @@ class TestStatusBarEventListener(object):
         GitStatusBarEventListener().on_activated_async(self.view_in_repo(tmp_repo))
         assert spawned[0]['encoding'] == 'latin-1'
         assert spawned[0]['fallback'] == ['cp1252']
+
+
+class TestMoveToFile(object):
+    """``move_to_file(1)`` falls back to the 'working directory clean' line."""
+
+    def move_cmd(self, content):
+        cmd = GitStatusMoveCmd()
+        cmd.view = sublime.View(settings={'git_view': 'status'}, content=content)
+        return cmd
+
+    def test_moves_to_the_clean_line_when_there_are_no_files(self):
+        cmd = self.move_cmd('On branch main\n\n' + GIT_WORKING_DIR_CLEAN + '\n')
+        cmd.move_to_file(1)
+        point = cmd.view.sel()[0].begin()
+        assert cmd.view.substr(cmd.view.line(point)) == GIT_WORKING_DIR_CLEAN
+
+    def test_does_not_move_when_the_clean_line_is_missing(self):
+        # view.find() returns Region(-1, -1) when the pattern is not found;
+        # moving to it would put the cursor at a negative point.
+        cmd = self.move_cmd('On branch main\n\nnothing to see here\n')
+        cmd.view.sel().clear()
+        cmd.view.sel().add(sublime.Region(3, 3))
+        cmd.move_to_file(1)
+        assert list(cmd.view.sel()) == [sublime.Region(3, 3)]
+
+
+class TestUnstageNoCommits(object):
+    """``no_commits()`` must ask *the repo*, not whatever the process cwd is."""
+
+    def unstage_cmd(self):
+        return GitStatusUnstageCommand(sublime.View())
+
+    def test_unstage_all_in_a_repo_without_commits(self, settings, tmp_repo):
+        tmp_repo.write('a.txt', 'a\n')
+        tmp_repo.git('add', '--', 'a.txt')
+
+        self.unstage_cmd().unstage_all(tmp_repo.path)
+
+        assert tmp_repo.git('status', '--porcelain') == '?? a.txt'
+
+    def test_unstage_file_in_a_repo_without_commits(self, settings, tmp_repo):
+        tmp_repo.write('a.txt', 'a\n')
+        tmp_repo.write('b.txt', 'b\n')
+        tmp_repo.git('add', '-A')
+
+        self.unstage_cmd().unstage(tmp_repo.path, ['a.txt'])
+
+        assert sorted(tmp_repo.git('status', '--porcelain').split('\n')) == ['?? a.txt', 'A  b.txt']
+
+    def test_unstage_file_in_a_repo_with_commits(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n', message='first')
+        tmp_repo.write('a.txt', 'changed\n')
+        tmp_repo.git('add', '--', 'a.txt')
+
+        self.unstage_cmd().unstage(tmp_repo.path, ['a.txt'])
+
+        # conftest's git() strips, so the leading ' ' of ' M' is gone
+        assert tmp_repo.git('status', '--porcelain') == 'M a.txt'

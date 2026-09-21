@@ -51,7 +51,7 @@ def _reset_sublime_state():
 
 @pytest.fixture(autouse=True)
 def _preserve_cwd():
-    """Cmd.cmd() currently calls os.chdir(); make sure tests do not leak it."""
+    """Safety net: no plugin code should chdir(), but do not let a test leak one."""
     cwd = os.getcwd()
     yield
     os.chdir(cwd)

@@ -15,6 +15,15 @@ Changes from upstream
   accepted in user-defined commands for backward compatibility.
 - Removed `package-metadata.json` so Package Control treats this as a manual
   package and does not try to update or replace it.
+- Git subprocesses are started with `Popen(cwd=...)` instead of `os.chdir()`,
+  so the plugin no longer changes the working directory of the whole Sublime
+  process. `cmd(..., ignore_errors=True)` now returns `(0, '', '')`.
+- Added `.python-version` (`3.14`) so Sublime Text always loads the plugin
+  under the 3.14 plugin host.
+- Blame views drop their cached commit/line data when closed instead of
+  keeping it for the lifetime of the process.
+- Fixed `get_remote_names()` (it crashed calling `.append` on a set), so
+  commands that list remote names work again.
 
 The original documentation is at
 [sublimegit.readthedocs.io](http://sublimegit.readthedocs.io/en/latest/) and

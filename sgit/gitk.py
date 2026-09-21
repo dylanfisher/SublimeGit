@@ -29,11 +29,11 @@ class GitGitkCommand(WindowCommand, GitCmd):
 
         def async_inner():
             try:
-                os.chdir(cwd)
                 proc = subprocess.Popen(cmd,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT,
                             startupinfo=startupinfo,
+                            cwd=cwd or None,
                             env=environment)
                 proc.wait()
             except OSError:

@@ -415,9 +415,10 @@ class GitStatusMoveCmd(GitStatusTextCmd):
                     self.move_to_region(self.view.line(files[-1]))
             elif self.get_all_stash_regions():
                 self.move_to_stash(1)
-            elif self.view.find(GIT_WORKING_DIR_CLEAN, 0, sublime.LITERAL):
+            else:
                 region = self.view.find(GIT_WORKING_DIR_CLEAN, 0, sublime.LITERAL)
-                self.move_to_region(region)
+                if region.begin() != -1:
+                    self.move_to_region(region)
         elif which in ('next', 'prev'):
             point = self.get_first_point()
             regions = self.get_all_file_regions()
@@ -754,7 +755,7 @@ class GitStatusUnstageCommand(TextCommand, GitStatusTextCmd):
         self.update_status(goto)
 
     def no_commits(self, repo):
-        return 0 != self.git_exit_code(['rev-list', 'HEAD', '--max-count=1'])
+        return 0 != self.git_exit_code(['rev-list', 'HEAD', '--max-count=1'], cwd=repo)
 
     def unstage(self, repo, files):
         if self.no_commits(repo):

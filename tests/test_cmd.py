@@ -94,18 +94,11 @@ class TestCmdSync(object):
         assert rc == 0
         assert realpath(out.strip()) == realpath(tmp_path)
 
-    @pytest.mark.xfail(strict=True, reason=(
-        'cmd() currently does os.chdir(cwd), which mutates the cwd of the whole '
-        'Sublime process. Refactor (a) replaces it with Popen(cwd=...); when that '
-        'lands this test should start passing and the xfail marker must be removed.'))
     def test_cmd_does_not_change_the_parent_process_cwd(self, settings, tmp_path):
         before = os.getcwd()
         PyCmd().cmd(['import os; print(os.getcwd())'], cwd=str(tmp_path))
         assert os.getcwd() == before
 
-    @pytest.mark.xfail(strict=True, reason=(
-        'cmd_async() currently does os.chdir(cwd) from a worker thread. '
-        'Refactor (a) should give it Popen(cwd=...) too.'))
     def test_cmd_async_does_not_change_the_parent_process_cwd(self, settings, tmp_path):
         before = os.getcwd()
         thread = PyCmd().cmd_async(['import os; print(os.getcwd())'], cwd=str(tmp_path))
@@ -150,10 +143,11 @@ class TestCmdSync(object):
         assert 'Could not decode output from git' in sublime.error_messages[0]
         assert 'utf-8' in sublime.error_messages[0]
 
-    def test_decoding_error_with_ignore_errors_returns_two_tuple(self, settings):
+    def test_decoding_error_with_ignore_errors_returns_empty_result(self, settings):
         # NOTE: current behaviour returns a 2-tuple here, not (rc, stdout, stderr)
         result = PyCmd().cmd(['import sys; sys.stdout.buffer.write(b"caf\\xe9")'], ignore_errors=True)
-        assert result == (0, '')
+        # ignore_errors now returns the same 3-tuple shape as the success path
+        assert result == (0, '', '')
         assert sublime.error_messages == []
 
     def test_missing_binary_without_ignore_errors_raises_and_reports(self, settings):
@@ -167,12 +161,13 @@ class TestCmdSync(object):
         assert "Executable '['/definitely/not/a/binary']' was not found in PATH" in sublime.error_messages[0]
         assert "git_executables['nope']" in sublime.error_messages[0]
 
-    def test_missing_binary_with_ignore_errors_returns_two_tuple(self, settings):
+    def test_missing_binary_with_ignore_errors_returns_empty_result(self, settings):
         class Missing(Cmd):
             executable = 'nope'
             bin = ['/definitely/not/a/binary']
 
-        assert Missing().cmd(['x'], ignore_errors=True) == (0, '')
+        # ignore_errors now returns the same 3-tuple shape as the success path
+        assert Missing().cmd(['x'], ignore_errors=True) == (0, '', '')
         assert sublime.error_messages == []
 
     def test_environment_passed_to_child(self, settings):

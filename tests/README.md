@@ -15,13 +15,10 @@ skipped when `git` is not on PATH.
 Behaviour that is pinned *as currently broken* is marked
 `@pytest.mark.xfail(strict=True, ...)`. When the corresponding fix lands the
 test turns into an XPASS, which `strict=True` reports as a failure — that is the
-signal to delete the marker. Currently:
-
-* `test_cmd.py` – `Cmd.cmd()` / `Cmd.cmd_async()` `os.chdir()` into `cwd`,
-  changing the cwd of the whole process (→ `Popen(cwd=...)`).
-* `test_helpers.py` – `get_remote_names()` calls `.append()` on a `set`.
-* `test_blame.py` – `GitBlameEventListener` has no `on_close`, so
-  `GitBlameCache` never shrinks.
+signal to delete the marker. There are currently no xfail markers; the ones for
+the `os.chdir` cwd leak (`test_cmd.py`), `get_remote_names()` (`test_helpers.py`)
+and the `GitBlameCache` cleanup (`test_blame.py`) were removed when those fixes
+landed.
 
 The "unpushed" tests in `test_status.py` are *not* xfailed, because the current
 `git diff @{upstream}..` check does produce a message; the two tests

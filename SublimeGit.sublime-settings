@@ -46,6 +46,16 @@
     "git_update_status_on_focus": true,
 
     /*
+     * Update Diff View on Focus
+     *
+     * If set to true, Git: Diff views will be regenerated whenever
+     * they come back in focus, so they reflect the current state
+     * of the working directory. Set to false to keep the diff as
+     * it was when it was first opened.
+     */
+    "git_update_diff_on_focus": true,
+
+    /*
      * Show Untracked Files in Status View
      *
      * If for some reason you have a lot of untracked files that

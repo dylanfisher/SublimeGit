@@ -299,8 +299,6 @@ class TestRemoteHelper(object):
         assert r.get_remotes('/repo') == REMOTE_LINES
         assert r.calls == [('lines', ['remote', '-v'], {'cwd': '/repo'})]
 
-    @pytest.mark.xfail(strict=True, raises=AttributeError,
-                       reason='get_remote_names calls .append on a set (bug); intended: sorted unique names')
     def test_get_remote_names_sorted_unique(self):
         assert Remotes().get_remote_names(REMOTE_LINES) == ['fetchonly', 'origin', 'upstream']
 
@@ -360,9 +358,9 @@ class TestErrorHelper(object):
         msg = 'error: Your local changes would be overwritten\nAborting\n'
         assert GitErrorHelper().format_error_message(msg) == 'Your local changes would be overwritten\n'
 
-    def test_note_prefix_is_never_stripped(self):
-        # `msg.lower().startswith('Note: ')` can never match a lower-cased string
-        assert GitErrorHelper().format_error_message('Note: keep me') == 'Note: keep me'
+    def test_note_prefix_is_stripped(self):
+        # git emits a capitalised "Note: "; the match is case-sensitive
+        assert GitErrorHelper().format_error_message('Note: keep me') == 'keep me'
         assert GitErrorHelper().format_error_message('note: keep me') == 'note: keep me'
 
     def test_other_messages_untouched(self):

@@ -221,8 +221,8 @@ class GitRemoteHelper(GitBranchHelper):
         for r in remotes:
             name, right = r.split('\t', 1)
             url, action = right.rsplit(' ', 1)
-            names.append(name)
-        return sorted(list(names))
+            names.add(name)
+        return sorted(names)
 
     def format_quick_remotes(self, remotes):
         data = {}
@@ -278,7 +278,7 @@ class GitErrorHelper(object):
     def format_error_message(self, msg):
         if msg.startswith('error: '):
             msg = msg[7:]
-        elif msg.lower().startswith('Note: '):
+        elif msg.startswith('Note: '):
             msg = msg[6:]
         if msg.endswith('Aborting\n'):
             msg = msg.rstrip()[:-8]

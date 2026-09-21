@@ -128,7 +128,7 @@ class GitHelpCommand(WindowCommand, GitCmd):
             logger.debug('Got git html path from settings: %s', git_html_path)
             return git_html_path
         else:
-            git_html_path = self.git_string(['--html-path'], cwd=os.path.realpath(''))
+            git_html_path = self.git_string(['--html-path'])
             logger.debug('Got git html path from git: %s', git_html_path)
             return git_html_path
 
