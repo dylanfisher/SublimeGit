@@ -8,3 +8,8 @@ docs/_build/
 
 # original zipped package from Package Control, kept as a backup
 SublimeGit.sublime-package.orig
+
+# test tooling
+.venv/
+.pytest_cache/
+__pycache__/
