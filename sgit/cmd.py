@@ -1,6 +1,4 @@
-# coding: utf-8
 import os
-import sys
 import subprocess
 import logging
 import threading
@@ -10,7 +8,7 @@ from functools import partial
 
 import sublime
 
-from .util import get_executable, get_setting, text_type
+from .util import get_executable, get_setting
 from .helpers import GitRepoHelper
 
 
@@ -55,7 +53,7 @@ class Cmd(object):
         if path:
             if isinstance(path, list):
                 env['PATH'] = os.pathsep.join(path)
-            elif isinstance(path, text_type):
+            elif isinstance(path, str):
                 env['PATH'] = path
         return env
 

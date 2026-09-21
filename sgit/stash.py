@@ -1,4 +1,3 @@
-# coding: utf-8
 import time
 
 import sublime
@@ -6,7 +5,7 @@ from sublime_plugin import WindowCommand
 
 from .util import noop
 from .cmd import GitCmd
-from .helpers import GitStashHelper, GitStatusHelper, GitErrorHelper
+from .helpers import GitStashHelper, GitStatusHelper, GitErrorHelper, KIND_STASH
 
 
 class GitStashWindowCmd(GitCmd, GitStashHelper, GitErrorHelper):
@@ -24,7 +23,7 @@ class GitStashWindowCmd(GitCmd, GitStashHelper, GitErrorHelper):
         callback = self.pop_or_apply_callback(repo, action, stashes)
         panel = []
         for name, title in stashes:
-            panel.append([title, "stash@{%s}" % name])
+            panel.append(sublime.QuickPanelItem(title, annotation="stash@{%s}" % name, kind=KIND_STASH))
 
         self.window.show_quick_panel(panel, callback)
 

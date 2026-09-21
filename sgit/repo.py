@@ -1,4 +1,3 @@
-# coding: utf-8
 import os
 
 import sublime
@@ -6,6 +5,7 @@ from sublime_plugin import WindowCommand
 
 from .util import noop, abbreviate_dir
 from .cmd import GitCmd
+from .helpers import format_details
 
 
 GIT_INIT_NO_DIR_ERROR = "No directory provided. Aborting git init."
@@ -152,10 +152,10 @@ class GitSwitchRepoCommand(WindowCommand, GitCmd):
         for repo in repos:
             basename = os.path.basename(repo)
             repo_dir = abbreviate_dir(repo)
-            choices.append([basename, repo_dir])
+            choices.append(sublime.QuickPanelItem(basename, details=format_details(repo_dir)))
 
         def on_done(idx):
             if idx != -1:
-                self.set_window_repository(self.window, repo)
+                self.set_window_repository(self.window, repos[idx])
 
         self.window.show_quick_panel(choices, on_done)

@@ -1,4 +1,3 @@
-# coding: utf-8
 from functools import partial
 
 import sublime
@@ -9,17 +8,17 @@ from .cmd import GitCmd
 from .helpers import GitRemoteHelper
 
 
-NO_REMOTES = u"No remotes have been configured. Remotes can be added with the Git: Add Remote command. Do you want to add a remote now?"
-DELETE_REMOTE = u"Are you sure you want to delete the remote %s?"
+NO_REMOTES = "No remotes have been configured. Remotes can be added with the Git: Add Remote command. Do you want to add a remote now?"
+DELETE_REMOTE = "Are you sure you want to delete the remote %s?"
 
-NO_ORIGIN_REMOTE = u"You are not on any branch and no origin has been configured. Please check out a branch and run Git: Remote Add to add a remote."
-NO_BRANCH_REMOTES = u"No remotes have been configured for the branch %s and no origin exists. Please run Git: Remote Add to add a remote."
+NO_ORIGIN_REMOTE = "You are not on any branch and no origin has been configured. Please check out a branch and run Git: Remote Add to add a remote."
+NO_BRANCH_REMOTES = "No remotes have been configured for the branch %s and no origin exists. Please run Git: Remote Add to add a remote."
 
-CURRENT_NO_UPSTREAM = u"No upstream currently is currently specified for {branch}. Do you want to set the upstream to {merge} on {remote}?"
-CURRENT_DIFFERENT_UPSTREAM = u"The upstream for {branch} is currently set to {branch_merge} on {branch_remote}. Do you want to change it to {merge} on {remote}?"
+CURRENT_NO_UPSTREAM = "No upstream currently is currently specified for {branch}. Do you want to set the upstream to {merge} on {remote}?"
+CURRENT_DIFFERENT_UPSTREAM = "The upstream for {branch} is currently set to {branch_merge} on {branch_remote}. Do you want to change it to {merge} on {remote}?"
 
-NO_UPSTREAM = u"No upstream is configured for your current branch. Do you want to run Git: Push Current Branch?"
-NO_TRACKING = u"No tracking information is configured for your current branch. Do you want to run Git: Pull Current Branch?"
+NO_UPSTREAM = "No upstream is configured for your current branch. Do you want to run Git: Push Current Branch?"
+NO_TRACKING = "No tracking information is configured for your current branch. Do you want to run Git: Pull Current Branch?"
 
 REMOTE_SHOW_TITLE_PREFIX = '*git-remote*: '
 
@@ -46,7 +45,7 @@ class GitFetchCommand(WindowCommand, GitCmd, GitRemoteHelper):
 
         if len(remotes) > 1:
             choices = self.format_quick_remotes(remotes)
-            choices.append(['+ All', 'Fetch from all configured remotes', 'git fetch --all'])
+            choices.append(sublime.QuickPanelItem('+ All', details=['Fetch from all configured remotes', 'git fetch --all']))
 
             def on_done(idx):
                 if idx == -1:
@@ -54,7 +53,7 @@ class GitFetchCommand(WindowCommand, GitCmd, GitRemoteHelper):
                 if idx == len(choices) - 1:
                     self.on_remote(repo)
                 else:
-                    self.on_remote(repo, choices[idx][0])
+                    self.on_remote(repo, choices[idx].trigger)
 
             self.window.show_quick_panel(choices, on_done)
         else:
@@ -123,7 +122,7 @@ class GitPushCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
             def on_done(idx):
                 if idx == -1:
                     return
-                branch_remote = choices[idx][0]
+                branch_remote = choices[idx].trigger
                 self.on_remote(repo, branch, branch_remote)
 
             self.window.show_quick_panel(choices, on_done)
@@ -191,7 +190,7 @@ class GitPullCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
             def on_done(idx):
                 if idx == -1:
                     return
-                remote = choices[idx][0]
+                remote = choices[idx].trigger
                 self.on_remote(repo, branch, remote)
 
             self.window.show_quick_panel(choices, on_done)
@@ -208,7 +207,7 @@ class GitPullCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
         def on_done(idx):
             if idx == -1:
                 return
-            branch = choices[idx][0]
+            branch = choices[idx].trigger
             self.on_remote_branch(repo, branch, remote, branch)
 
         sublime.set_timeout(partial(self.window.show_quick_panel, choices, on_done), 50)
@@ -439,10 +438,11 @@ class GitRemoteCommand(WindowCommand, GitCmd, GitRemoteHelper):
 
     def remote_panel_done(self, repo, choices, idx):
         if idx != -1:
-            remote = choices[idx][0]
+            remote = choices[idx].trigger
 
             def on_remote():
-                self.window.show_quick_panel(self.REMOTE_ACTIONS, partial(self.action_panel_done, repo, remote))
+                actions = [sublime.QuickPanelItem(a, details=[d]) for a, d in self.REMOTE_ACTIONS]
+                self.window.show_quick_panel(actions, partial(self.action_panel_done, repo, remote))
 
             sublime.set_timeout(on_remote, 50)
 

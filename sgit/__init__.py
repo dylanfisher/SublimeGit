@@ -1,6 +1,5 @@
-# coding: utf-8
 
-__version__ = '1.0.36'
+__version__ = '1.0.37-fork'
 
 
 # Import all the commands

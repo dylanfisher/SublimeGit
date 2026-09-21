@@ -1,4 +1,3 @@
-# coding: utf-8
 from functools import partial
 import sublime
 from sublime_plugin import WindowCommand, TextCommand

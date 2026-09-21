@@ -1,4 +1,3 @@
-# coding: utf-8
 from functools import partial
 import sublime
 from sublime_plugin import WindowCommand
@@ -7,7 +6,9 @@ from ..util import noop, StatusSpinner
 from ..cmd import GitFlowCmd
 
 
-enabled = True
+# Overwritten by ``plugin_loaded`` from the ``git_extensions`` setting.
+# Off by default, so the commands stay hidden if that never runs.
+enabled = False
 
 
 __all__ = ['GitFlowInitCommand', 'GitFlowFeatureCommand', 'GitFlowFeatureStartCommand', 'GitFlowFeatureFinishCommand',
@@ -30,7 +31,7 @@ class GitFlowWindowCmd(GitFlowCmd):
         for l in sorted(lines, key=lambda x: (0 if x[0] == '*' else 1, x[2:])):
             current = l[0:2]
             name = l[2:]
-            choices.append(['%s%s' % (current, name.strip())])
+            choices.append('%s%s' % (current, name.strip()))
             branches.append(name)
         return branches, choices
 

@@ -13,6 +13,49 @@ MONOSPACE_FONT = 1
 TRANSIENT = 4
 IGNORECASE = 2
 
+KIND_ID_AMBIGUOUS = 0
+KIND_ID_KEYWORD = 1
+KIND_ID_TYPE = 2
+KIND_ID_FUNCTION = 3
+KIND_ID_NAMESPACE = 4
+KIND_ID_NAVIGATION = 5
+KIND_ID_MARKUP = 6
+KIND_ID_VARIABLE = 7
+KIND_ID_SNIPPET = 8
+KIND_ID_COLOR_REDISH = 9
+KIND_ID_COLOR_ORANGISH = 10
+KIND_ID_COLOR_YELLOWISH = 11
+KIND_ID_COLOR_GREENISH = 12
+KIND_ID_COLOR_CYANISH = 13
+KIND_ID_COLOR_BLUISH = 14
+KIND_ID_COLOR_PURPLISH = 15
+KIND_ID_COLOR_PINKISH = 16
+KIND_ID_COLOR_DARK = 17
+KIND_ID_COLOR_LIGHT = 18
+KIND_AMBIGUOUS = (KIND_ID_AMBIGUOUS, '', '')
+
+
+class QuickPanelItem(object):
+    """Stand-in for ``sublime.QuickPanelItem`` (ST 4083+)."""
+
+    def __init__(self, trigger, details='', annotation='', kind=KIND_AMBIGUOUS):
+        self.trigger = trigger
+        self.details = details
+        self.annotation = annotation
+        self.kind = kind
+
+    def __eq__(self, other):
+        return (isinstance(other, QuickPanelItem)
+                and (self.trigger, self.details, self.annotation, self.kind)
+                == (other.trigger, other.details, other.annotation, other.kind))
+
+    def __ne__(self, other):
+        return not self == other
+
+    def __repr__(self):
+        return 'QuickPanelItem(%r, details=%r, annotation=%r, kind=%r)' % (
+            self.trigger, self.details, self.annotation, self.kind)
+
 
 # --- settings -------------------------------------------------------------
 

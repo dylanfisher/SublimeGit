@@ -1,4 +1,3 @@
-# coding: utf-8
 from functools import partial
 
 import sublime
@@ -8,7 +7,9 @@ from ..util import noop, StatusSpinner
 from ..cmd import LegitCmd
 
 
-enabled = True
+# Overwritten by ``plugin_loaded`` from the ``git_extensions`` setting.
+# Off by default, so the commands stay hidden if that never runs.
+enabled = False
 
 
 __all__ = ['LegitSwitchCommand', 'LegitSyncCommand', 'LegitPublishCommand', 'LegitUnpublishCommand',
@@ -34,7 +35,7 @@ class LegitWindowCmd(LegitCmd):
             pub = pub.strip(' \t()')
             if not pub in filter:
                 continue
-            choices.append(['%s%s' % (current, name.strip()), '  %s' % pub])
+            choices.append(sublime.QuickPanelItem('%s%s' % (current, name.strip()), annotation=pub))
             branches.append(name)
         return branches, choices
 

@@ -1,4 +1,3 @@
-# coding: utf-8
 from functools import partial
 
 import sublime
@@ -13,17 +12,17 @@ from .status import GIT_WORKING_DIR_CLEAN
 GIT_COMMIT_VIEW_TITLE = "COMMIT_EDITMSG"
 GIT_COMMIT_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Commit Message.tmLanguage'
 
-GIT_NOTHING_STAGED = u'No changes added to commit. Use s on files/sections in the status view to stage changes.'
-GIT_COMMIT_TEMPLATE = u"""{old_msg}
+GIT_NOTHING_STAGED = 'No changes added to commit. Use s on files/sections in the status view to stage changes.'
+GIT_COMMIT_TEMPLATE = """{old_msg}
 # Please enter the commit message for your changes. Lines starting
 # with '#' will be ignored, and an empty message aborts the commit.
 {status}"""
 
-GIT_AMEND_PUSHED = (u"It is discouraged to rewrite history which has already been pushed. "
-                    u"Are you sure you want to amend the commit?")
+GIT_AMEND_PUSHED = ("It is discouraged to rewrite history which has already been pushed. "
+                    "Are you sure you want to amend the commit?")
 
-CUT_LINE = u"------------------------ >8 ------------------------\n"
-CUT_EXPLANATION = u"# Do not touch the line above.\n# Everything below will be removed.\n"
+CUT_LINE = "------------------------ >8 ------------------------\n"
+CUT_EXPLANATION = "# Do not touch the line above.\n# Everything below will be removed.\n"
 
 
 class GitCommit(object):
@@ -181,14 +180,6 @@ class GitCommitEventListener(EventListener):
                     break
                 if l.end() - l.begin() > 72:
                     view.add_regions('git-commit.others', [sublime.Region(l.begin() + 72, l.end())], 'invalid', 'dot')
-
-    def on_activated(self, view):
-        if sublime.version() < '3000' and get_setting('git_commit_pedantic') is True:
-            self.mark_pedantic(view)
-
-    def on_modified(self, view):
-        if sublime.version() < '3000' and get_setting('git_commit_pedantic') is True:
-            self.mark_pedantic(view)
 
     def on_modified_async(self, view):
         if get_setting('git_commit_pedantic') is True:

@@ -1,4 +1,3 @@
-# coding: utf-8
 from sublime_plugin import WindowCommand
 
 from .util import StatusSpinner

@@ -1,4 +1,3 @@
-# coding: utf-8
 from functools import partial
 
 import sublime
@@ -6,10 +5,10 @@ from sublime_plugin import WindowCommand
 
 from .util import StatusSpinner, noop
 from .cmd import GitCmd
-from .helpers import GitTagHelper, GitErrorHelper
+from .helpers import GitTagHelper, GitErrorHelper, format_details
 
 
-TAG_FORCE = u'The tag %s already exists. Do you want to overwrite it?'
+TAG_FORCE = 'The tag %s already exists. Do you want to overwrite it?'
 
 
 class GitAddTagCommand(WindowCommand, GitTagHelper, GitErrorHelper, GitCmd):
@@ -111,11 +110,11 @@ class GitTagCommand(WindowCommand, GitTagHelper, GitErrorHelper, GitCmd):
 
         tags = self.get_tags(repo)
         choices = self.format_quick_tags(tags)
-        choices.append([self.ADD_TAG, 'Add a tag referencing the current commit.'])
+        choices.append(sublime.QuickPanelItem(self.ADD_TAG, details=['Add a tag referencing the current commit.']))
 
         def on_done(idx):
             if idx != -1:
-                tag = choices[idx][0]
+                tag = choices[idx].trigger
                 if tag == self.ADD_TAG:
                     self.window.run_command('git_add_tag')
                 else:
@@ -124,7 +123,8 @@ class GitTagCommand(WindowCommand, GitTagHelper, GitErrorHelper, GitCmd):
         self.window.show_quick_panel(choices, on_done)
 
     def on_tag(self, repo, tag):
-        choices = [[a, t.format(tag=tag)] for a, t in self.TAG_ACTIONS]
+        choices = [sublime.QuickPanelItem(a, details=format_details(t.format(tag=tag)))
+                   for a, t in self.TAG_ACTIONS]
 
         def on_done(idx):
             if idx != -1:

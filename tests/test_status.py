@@ -714,9 +714,10 @@ class TestHelpersAgainstRealGit(object):
             ('first', sha1, 'Test User', 'test@example.com')]
         hashes, choices = g.format_quick_log(log)
         assert hashes == [sha2, sha1]
-        assert choices[0][0] == 'second'
-        assert choices[0][1] == '%s by Test User <test@example.com>' % sha2[:8]
-        assert choices[0][2].endswith('(%s)' % log[0][4])
+        assert isinstance(choices[0], sublime.QuickPanelItem)
+        assert choices[0].trigger == 'second'
+        assert choices[0].details[0] == '%s by Test User &lt;test@example.com&gt;' % sha2[:8]
+        assert choices[0].details[1].endswith('(%s)' % log[0][4])
         assert g.get_quick_log(tmp_repo.path, path='a.txt') == [log[1]]
 
     def test_branches_and_stashes(self, settings, tmp_repo):
@@ -1280,7 +1281,8 @@ class TestDiffRefreshCommand(object):
 class TestQuickStatusCommand(object):
     """Pins the *behaviour* of the quick status panel.
 
-    Refactor (d) replaces the plain string items with ``QuickPanelItem``s; the
+    The rows are plain ``git status --porcelain`` strings (not
+    ``QuickPanelItem``s, which are only used for multi-column rows); the
     selected index must keep mapping to the same file and the same follow-up
     commands.
     """
@@ -1329,9 +1331,8 @@ class TestQuickStatusCommand(object):
 class TestStatusBarEventListener(object):
     """Which events spawn an updater, and for which settings.
 
-    ``on_activated``/``on_load``/``on_post_save`` are ST2-only shims guarded by
-    ``sublime.version() < '3000'``; on ST4 only the ``_async`` variants do work.
-    Refactor (d) removes the shims, which must not change this.
+    Only the ``_async`` variants exist; the ST2-only sync shims
+    (``on_activated``/``on_load``/``on_post_save``) were removed.
     """
 
     @pytest.fixture
@@ -1404,13 +1405,10 @@ class TestStatusBarEventListener(object):
         assert tmp_repo.path not in sgit.status._state.cache
         assert sgit.status._state.token(tmp_repo.path) == token_before + 1
 
-    def test_sync_events_do_nothing_on_st3_plus(self, settings, tmp_repo, spawned):
-        view = self.view_in_repo(tmp_repo)
+    def test_sync_events_are_gone(self):
         listener = GitStatusBarEventListener()
-        listener.on_activated(view)
-        listener.on_load(view)
-        listener.on_post_save(view)
-        assert spawned == []
+        for name in ('on_activated', 'on_load', 'on_post_save'):
+            assert not hasattr(listener, name)
 
     def test_simple_setting_is_passed_through(self, settings, tmp_repo, spawned):
         settings.set('git_status_bar', 'simple')

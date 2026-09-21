@@ -1,91 +1,42 @@
-# coding: utf-8
-import sys
 import logging
 
 import sublime
 
-# set up some logging
-logging.basicConfig(level=logging.WARNING, format="[%(asctime)s - %(levelname)-8s - %(name)s] %(message)s")
+from .sgit import *  # noqa
+from .sgit.git_extensions.legit import *  # noqa
+from .sgit.git_extensions.git_flow import *  # noqa
+
+LOG_FORMAT = "[%(asctime)s - %(levelname)-8s - %(name)s] %(message)s"
+
 logger = logging.getLogger('SublimeGit')
 
-# reload modules if necessary
-LOAD_ORDER = [
-    # base
-    '',
-    '.util',
-    '.cmd',
-    '.helpers',
 
-    # commands
-    '.help',
-    '.cli',
-    '.repo',
-    '.diff',
-    '.show',
-    '.blame',
-    '.log',
-    '.stash',
-    '.branch',
-    '.remote',
-    '.status',
-    '.add',
-    '.commit',
-    '.checkout',
-    '.merge',
-
-    # meta
-    '.sublimegit',
-
-    # extensions
-    '.git_extensions.legit',
-    '.git_extensions.git_flow',
-]
-
-needs_reload = [n for n, m in list(sys.modules.items()) if n[0:4] == 'sgit' and m is not None]
-
-reloaded = []
-for postfix in LOAD_ORDER:
-    module = 'sgit' + postfix
-    if module in needs_reload:
-        reloaded.append(module)
-        reload(sys.modules[module])
-if reloaded:
-    logger.info('Reloaded %s' % ", ".join(reloaded))
+def configure_logging(level_name):
+    """Configure only the ``SublimeGit`` logger (never the root logger, which is
+    shared with every other plugin in the host). Safe to call repeatedly: the
+    stream handler is attached once and survives plugin reloads."""
+    if not any(getattr(h, '_sublimegit', False) for h in logger.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        handler._sublimegit = True
+        logger.addHandler(handler)
+    logger.propagate = False
+    logger.setLevel(getattr(logging, (level_name or '').upper(), logging.WARNING))
 
 
-# import commands and listeners
-if sys.version_info[0] == 2:
+def plugin_loaded():
     settings = sublime.load_settings('SublimeGit.sublime-settings')
 
-    # set log level
-    lvl = getattr(logging, settings.get('log_level', '').upper(), logging.WARNING)
-    logger.setLevel(lvl)
+    configure_logging(settings.get('log_level', ''))
 
-    from sgit import *  # noqa
-    from sgit.git_extensions.legit import *  # noqa
-    from sgit.git_extensions.git_flow import *  # noqa
+    # Enable extensions (their commands check the module-level ``enabled`` flag)
+    extensions = settings.get('git_extensions', {}) or {}
+    git_extensions.legit.enabled = bool(extensions.get('legit', False))
+    git_extensions.git_flow.enabled = bool(extensions.get('git_flow', False))
 
-    # Enable plugins
-    git_extensions.legit.enabled = settings.get('git_extensions', {}).get('legit', True)
-    git_extensions.git_flow.enabled = settings.get('git_extensions', {}).get('git_flow', True)
 
-    def unload_handler():
-        logging.shutdown()
-else:
-    from .sgit import *  # noqa
-    from .sgit.git_extensions.legit import *  # noqa
-    from .sgit.git_extensions.git_flow import *  # noqa
-
-    def plugin_loaded():
-        settings = sublime.load_settings('SublimeGit.sublime-settings')
-
-        # set log level
-        lvl = getattr(logging, settings.get('log_level', '').upper(), logging.WARNING)
-        logger.setLevel(lvl)
-
-        # Enable plugins
-        git_extensions.legit.enabled = settings.get('git_extensions', {}).get('legit', True)
-        git_extensions.git_flow.enabled = settings.get('git_extensions', {}).get('git_flow', True)
-
-    def plugin_unloaded():
-        logging.shutdown()
+def plugin_unloaded():
+    for handler in list(logger.handlers):
+        if getattr(handler, '_sublimegit', False):
+            logger.removeHandler(handler)
+            handler.close()

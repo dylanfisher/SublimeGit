@@ -1,4 +1,3 @@
-# coding: utf-8
 import sublime
 from sublime_plugin import WindowCommand, TextCommand
 

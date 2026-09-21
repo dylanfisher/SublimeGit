@@ -1,4 +1,3 @@
-# coding: utf-8
 from functools import partial
 
 import sublime
@@ -12,7 +11,7 @@ from .helpers import GitTagHelper
 
 GIT_BRANCH_EXISTS_MSG = "The branch %s already exists. Do you want to overwrite it?"
 
-NO_REMOTES = u"No remotes have been configured. Remotes can be added with the Git: Add Remote command. Do you want to add a remote now?"
+NO_REMOTES = "No remotes have been configured. Remotes can be added with the Git: Add Remote command. Do you want to add a remote now?"
 
 class GitCheckoutWindowCmd(GitCmd, GitBranchHelper, GitLogHelper, GitErrorHelper):
     pass
@@ -84,7 +83,7 @@ class GitCheckoutTagCommand(WindowCommand, GitCheckoutWindowCmd, GitTagHelper):
 
             def on_done(idx):
                 if idx != -1:
-                    tag = choices[idx][0]
+                    tag = choices[idx].trigger
                     self.on_tag(repo, tag)
 
             self.window.show_quick_panel(choices, on_done)
@@ -198,7 +197,7 @@ class GitCheckoutRemoteBranchCommand(WindowCommand, GitCheckoutWindowCmd, GitRem
 
     def remote_panel_done(self, repo, choices, idx):
         if idx != -1:
-            remote = choices[idx][0]
+            remote = choices[idx].trigger
 
             remote_branches = self.get_remote_branches(repo, remote)
             if not remote_branches:
@@ -206,7 +205,7 @@ class GitCheckoutRemoteBranchCommand(WindowCommand, GitCheckoutWindowCmd, GitRem
 
             formatted_remote_branches = self.format_quick_branches(remote_branches)
             local_branches = [b for _, b in self.get_branches(repo)]
-            remote_only_branches = [b for b in formatted_remote_branches if b[0] not in frozenset(local_branches)]
+            remote_only_branches = [b for b in formatted_remote_branches if b.trigger not in frozenset(local_branches)]
 
             if not remote_only_branches:
                 return sublime.error_message("All remote branches are already present locally")
@@ -218,7 +217,7 @@ class GitCheckoutRemoteBranchCommand(WindowCommand, GitCheckoutWindowCmd, GitRem
 
     def remote_branch_panel_done(self, repo, branches, idx):
         if idx != -1:
-            branch = branches[idx][0]
+            branch = branches[idx].trigger
 
             exit, stdout, stderr = self.git(['checkout', branch], cwd=repo)
             if exit == 0:

@@ -1,6 +1,6 @@
-# coding: utf-8
 import re
 import os
+import html
 import logging
 import sublime
 
@@ -8,6 +8,23 @@ from .util import get_setting
 
 
 logger = logging.getLogger('SublimeGit.helpers')
+
+# Quick panel item kinds (icon letter + tooltip shown next to each row)
+KIND_REMOTE = (sublime.KIND_ID_NAMESPACE, 'r', 'Remote')
+KIND_BRANCH = (sublime.KIND_ID_COLOR_ORANGISH, 'b', 'Branch')
+KIND_COMMIT = (sublime.KIND_ID_COLOR_BLUISH, 'c', 'Commit')
+KIND_TAG = (sublime.KIND_ID_COLOR_GREENISH, 't', 'Tag')
+KIND_STASH = (sublime.KIND_ID_COLOR_PURPLISH, 's', 'Stash')
+
+
+def format_details(*parts):
+    """Build a ``QuickPanelItem.details`` list.
+
+    ``details`` is rendered as minihtml, so anything coming from git (author
+    emails in angle brackets, urls containing ``&``, ...) has to be escaped or
+    it is silently swallowed by the markup parser. Empty parts are dropped.
+    """
+    return [html.escape(p, quote=False) for p in parts if p]
 
 
 GIT_INIT_DIALOG = ("Could not find any git repositories based on the open files and folders. "
@@ -231,8 +248,11 @@ class GitRemoteHelper(GitBranchHelper):
             url, action = right.rsplit(' ', 1)
             data.setdefault(name, {})[action] = "%s %s" % (url, action)
         choices = []
-        for remote, urls in list(data.items()):
-            choices.append([remote, urls.get('(fetch)', None), urls.get('(push)', None)])
+        for remote, urls in data.items():
+            choices.append(sublime.QuickPanelItem(
+                remote,
+                details=format_details(urls.get('(fetch)'), urls.get('(push)')),
+                kind=KIND_REMOTE))
         return choices
 
     def get_remote_url(self, repo, remote):
@@ -255,7 +275,7 @@ class GitRemoteHelper(GitBranchHelper):
         choices = []
         for b in branches:
             branch = b.split('/', 1)[1]
-            choices.append([branch, b])
+            choices.append(sublime.QuickPanelItem(branch, details=format_details(b), kind=KIND_BRANCH))
         return choices
 
 
@@ -360,7 +380,7 @@ class GitDiffHelper(object):
     def get_diff(self, repo, path=None, cached=False, unified=None):
         try:
             unified = int(unified)
-        except:
+        except (TypeError, ValueError):
             unified = None
         args = ['diff',
                 '--cached' if cached else None,
@@ -395,10 +415,10 @@ class GitLogHelper(object):
         out = self.git_string(cmd, cwd=repo, strip=False)
 
         lines = []
-        for line in out.split(u'\u0004'):
+        for line in out.split('\u0004'):
             line = line.strip()
             if line:
-                parts = line.split(u'\u0003')
+                parts = line.split('\u0003')
                 if len(parts) != 6:
                     raise Exception("The line %s splits to %s", line, parts)
                 lines.append(parts)
@@ -408,7 +428,10 @@ class GitLogHelper(object):
         hashes = [l[1] for l in log]
         choices = []
         for subject, sha, name, email, dt, reldt in log:
-            choices.append([subject, '%s by %s <%s>' % (sha[0:8], name, email), '%s (%s)' % (reldt, dt)])
+            choices.append(sublime.QuickPanelItem(
+                subject,
+                details=format_details('%s by %s <%s>' % (sha[0:8], name, email), '%s (%s)' % (reldt, dt)),
+                kind=KIND_COMMIT))
         return hashes, choices
 
 
@@ -424,5 +447,5 @@ class GitTagHelper(object):
         out = []
         for t in reversed(tags):
             tag, ann = t.split(' ', 1)
-            out.append([tag, ann.strip()])
+            out.append(sublime.QuickPanelItem(tag, details=format_details(ann.strip()), kind=KIND_TAG))
         return out

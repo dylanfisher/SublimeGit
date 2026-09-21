@@ -1,5 +1,3 @@
-# coding: utf-8
-import sys
 import logging
 import webbrowser
 
@@ -26,8 +24,7 @@ class SublimeGitDocumentationCommand(WindowCommand):
     Open a webbrowser to the online SublimeGit documentation.
     """
 
-    URL = "https://docs.sublimegit.net/?utm_source=st%s&utm_medium=command&utm_campaign=docs"
+    URL = "https://sublimegit.readthedocs.io/en/latest/"
 
     def run(self):
-        url = self.URL % sys.version_info[0]
-        webbrowser.open(url)
+        webbrowser.open(self.URL)

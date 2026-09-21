@@ -1,12 +1,8 @@
-# coding: utf-8
 import os
 import re
 import logging
 import webbrowser
-try:
-    from xml.etree import cElementTree as ET
-except:
-    from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET
 
 import sublime
 from sublime_plugin import WindowCommand
@@ -79,12 +75,12 @@ class GitHelpCommand(WindowCommand, GitCmd):
     def format_fancy(self, filename):
         # deal wth a couple of special files
         if filename.endswith('everyday.html'):
-            return [u'Everyday GIT With 20 Commands Or So',
-                    u'Individual Developer (Standalone) commands are essential for anybody ' +
+            return ['Everyday GIT With 20 Commands Or So',
+                    'Individual Developer (Standalone) commands are essential for anybody ' +
                     'who makes a commit, even for somebody who works alone.']
         elif filename.endswith('user-manual.html'):
-            return [u"Git User's Manual",
-                    u"Git is a fast distributed revision control system."]
+            return ["Git User's Manual",
+                    "Git is a fast distributed revision control system."]
 
         title = os.path.basename(filename)[:-5]
         text = '[no summary]'

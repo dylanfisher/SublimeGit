@@ -1,4 +1,3 @@
-# coding: utf-8
 import sublime
 from sublime_plugin import WindowCommand, TextCommand
 
@@ -61,8 +60,6 @@ class GitCustomCommand(WindowCommand, GitCmd, GitErrorHelper):
             self.on_command(repo, cmd, run_async=run_async)
 
     def on_command(self, repo, cmd, run_async):
-        if sublime.version() < '3000':
-            cmd = cmd.encode('utf-8')
         cmd = shlex.split(cmd)
         self.init_output(repo, cmd)
         if run_async:

@@ -5,7 +5,8 @@ import pytest
 import sublime
 
 from sgit.helpers import (GitRepoHelper, GitBranchHelper, GitRemoteHelper, GitStashHelper,
-                          GitErrorHelper, GitStatusHelper, GitLogHelper, GitTagHelper, GIT_INIT_DIALOG)
+                          GitErrorHelper, GitStatusHelper, GitLogHelper, GitTagHelper, GIT_INIT_DIALOG,
+                          KIND_REMOTE, KIND_BRANCH, KIND_COMMIT, KIND_TAG)
 
 
 # ---------------------------------------------------------------------------
@@ -303,11 +304,14 @@ class TestRemoteHelper(object):
         assert Remotes().get_remote_names(REMOTE_LINES) == ['fetchonly', 'origin', 'upstream']
 
     def test_format_quick_remotes(self):
-        assert Remotes().format_quick_remotes(REMOTE_LINES) == [
-            ['origin', 'https://example.com/a.git (fetch)', 'https://example.com/a.git (push)'],
-            ['upstream', 'git@example.com:b.git (fetch)', 'git@example.com:b-push.git (push)'],
-            ['fetchonly', 'https://example.com/c.git (fetch)', None],
+        items = Remotes().format_quick_remotes(REMOTE_LINES)
+        assert all(isinstance(i, sublime.QuickPanelItem) for i in items)
+        assert [(i.trigger, i.details) for i in items] == [
+            ('origin', ['https://example.com/a.git (fetch)', 'https://example.com/a.git (push)']),
+            ('upstream', ['git@example.com:b.git (fetch)', 'git@example.com:b-push.git (push)']),
+            ('fetchonly', ['https://example.com/c.git (fetch)']),
         ]
+        assert items[0].kind == KIND_REMOTE
 
     def test_format_quick_remotes_empty(self):
         assert Remotes().format_quick_remotes([]) == []
@@ -319,8 +323,11 @@ class TestRemoteHelper(object):
         assert r.calls[0][1] == ['branch', '--list', '--no-color', '--remotes']
 
     def test_format_quick_branches_strips_remote(self):
-        assert Remotes().format_quick_branches(['origin/main', 'origin/feat/x']) == [
-            ['main', 'origin/main'], ['feat/x', 'origin/feat/x']]
+        items = Remotes().format_quick_branches(['origin/main', 'origin/feat/x'])
+        assert all(isinstance(i, sublime.QuickPanelItem) for i in items)
+        assert [(i.trigger, i.details) for i in items] == [
+            ('main', ['origin/main']), ('feat/x', ['origin/feat/x'])]
+        assert items[0].kind == KIND_BRANCH
 
     def test_config_lookups(self):
         r = Remotes(string='origin')
@@ -463,7 +470,11 @@ class TestLogHelper(object):
         log = [['Subject one', 'abcdef0123456789' + 'a' * 24, 'Ann', 'ann@example.com', 'Mon Jan 1', '2 days ago']]
         hashes, choices = GitLogHelper().format_quick_log(log)
         assert hashes == [log[0][1]]
-        assert choices == [['Subject one', 'abcdef01 by Ann <ann@example.com>', '2 days ago (Mon Jan 1)']]
+        assert len(choices) == 1 and isinstance(choices[0], sublime.QuickPanelItem)
+        assert choices[0].trigger == 'Subject one'
+        # details is rendered as minihtml, so the angle brackets are escaped
+        assert choices[0].details == ['abcdef01 by Ann &lt;ann@example.com&gt;', '2 days ago (Mon Jan 1)']
+        assert choices[0].kind == KIND_COMMIT
 
 
 class TestTagHelper(object):
@@ -475,5 +486,7 @@ class TestTagHelper(object):
         assert [c[1] for c in t.calls] == [['tag', '--list', '-n1'], ['tag', '--list', '-n0', '--no-column']]
 
     def test_format_quick_tags_reverses_and_strips_annotation(self):
-        assert GitTagHelper().format_quick_tags(['v1.0            first', 'v2.0            second release']) == [
-            ['v2.0', 'second release'], ['v1.0', 'first']]
+        items = GitTagHelper().format_quick_tags(['v1.0            first', 'v2.0            second release'])
+        assert all(isinstance(i, sublime.QuickPanelItem) for i in items)
+        assert [(i.trigger, i.details) for i in items] == [('v2.0', ['second release']), ('v1.0', ['first'])]
+        assert items[0].kind == KIND_TAG

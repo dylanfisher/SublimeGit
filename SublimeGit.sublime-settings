@@ -244,18 +244,17 @@
      * SublimeGit ships with extensions for:
      *
      *  - git-flow (https://github.com/nvie/gitflow)
-     *  - legit (http://www.git-legit.org/)
-     *  - hub (https://github.com/defunkt/hub)
+     *  - legit (https://github.com/frostming/legit, unmaintained)
      *
-     * To enable or disable these extensions set these
-     * settings to true/false. If an extension is disabled,
-     * its commands will not show up in your command
-     * palette.
+     * Both are disabled by default: git-flow is rarely used and
+     * legit is no longer maintained. Set an entry to true to
+     * enable its commands; while disabled they do not show up
+     * in the command palette.
      *
      * Requires a restart of Sublime Text to take effect.
      */
     "git_extensions": {
-        "git_flow": true,
-        "legit": true
+        "git_flow": false,
+        "legit": false
     }
 }

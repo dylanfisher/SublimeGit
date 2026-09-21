@@ -40,6 +40,25 @@ Changes from upstream
   the caret. Refreshes are coalesced per view (a request that arrives while one
   is running makes that result stale and queues exactly one more run), and a
   refresh on focus restores the scroll position so the view does not jump.
+- Removed the Python 2 / Sublime Text 2 compatibility code (`text_type`,
+  `string_types`, the `sublime.version() < '3000'` sync event hooks, the
+  module `reload` block and `basicConfig` root-logger setup in
+  `SublimeGit.py`). Logging is now configured only on the `SublimeGit` logger
+  (one handler, no propagation), so it no longer reconfigures every other
+  plugin's logging.
+- Multi-column quick panels (log, remotes, remote branches, tags, stashes,
+  repositories, remote/tag actions, legit branches) use
+  `sublime.QuickPanelItem` with details/annotations instead of list-of-lists
+  rows. The `format_quick_*` helpers return `QuickPanelItem`s.
+- The `git_flow` and `legit` extensions are disabled by default
+  (`git_extensions` setting); enabling one requires a restart.
+- `SublimeGit: Documentation` opens
+  `https://sublimegit.readthedocs.io/en/latest/` (the old docs domain is
+  gone). `SublimeGit: Version` reports `1.0.37-fork`.
+- Removed the Package Control `messages/` release notes and `messages.json`.
+
+- Fixed `Git: Switch Repo` always selecting the last repository in the list
+  regardless of the choice made.
 
 The original documentation is at
 [sublimegit.readthedocs.io](http://sublimegit.readthedocs.io/en/latest/) and

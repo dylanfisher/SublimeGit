@@ -1,5 +1,3 @@
-# coding: utf-8
-import sys
 from os import path
 import logging
 
@@ -14,20 +12,6 @@ logger = logging.getLogger('SublimeGit.util')
 SETTINGS_FILE = 'SublimeGit.sublime-settings'
 
 
-# Compatibility
-
-PY2 = sys.version_info[0] == 2
-
-if PY2:
-    text_type = unicode
-    string_types = (str, unicode)
-    unichr = unichr
-else:
-    text_type = str
-    string_types = (str,)
-    unichr = chr
-
-
 # Callback helpers
 
 def noop(*args, **kwargs):
@@ -39,7 +23,7 @@ def noop(*args, **kwargs):
 def find_view_by_settings(window, **kwargs):
     for view in window.views():
         s = view.settings()
-        matches = [s.get(k) == v for k, v in list(kwargs.items())]
+        matches = [s.get(k) == v for k, v in kwargs.items()]
         if all(matches):
             return view
 
@@ -106,31 +90,16 @@ class GitPanelAppendCommand(TextCommand):
 # Directory helpers
 
 def get_user_dir():
-    user_dir = ''
     try:
-        user_dir = path.expanduser(u'~')
-    except:
-        try:
-            user_dir = path.expanduser('~')
-        except:
-            pass
-
-    if PY2 and isinstance(user_dir, str):
-        try:
-            user_dir = user_dir.decode('utf-8')
-        except:
-            pass
-
-    return user_dir
+        return path.expanduser('~')
+    except Exception:
+        return ''
 
 
 def abbreviate_dir(dirname):
     user_dir = get_user_dir()
-    try:
-        if dirname.startswith(user_dir):
-            dirname = u'~%s' % dirname[len(user_dir):]
-    except:
-        pass
+    if user_dir and isinstance(dirname, str) and dirname.startswith(user_dir):
+        dirname = '~%s' % dirname[len(user_dir):]
     return dirname
 
 

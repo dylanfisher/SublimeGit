@@ -1,4 +1,3 @@
-# coding: utf-8
 import os
 import logging
 import threading
@@ -269,7 +268,7 @@ class GitStatusTextCmd(GitCmd):
         return sections
 
     def section_at_point(self, point):
-        for s in list(SECTIONS.keys()):
+        for s in SECTIONS:
             if self.view.score_selector(point, SECTION_SELECTOR_PREFIX + s) > 0:
                 return s
 
@@ -385,7 +384,7 @@ class GitStatusMoveCmd(GitStatusTextCmd):
             if sections and len(sections) >= which:
                 section = sections[which - 1]
                 self.move_to_region(section)
-        elif which in list(SECTIONS.keys()):
+        elif which in SECTIONS:
             sections = self.get_sections()
             for section in sections:
                 if self.section_at_region(section) == which:
@@ -659,7 +658,7 @@ class GitStatusCommand(WindowCommand, GitStatusBuilder):
             view.settings().set('git_repo', repo)
             view.settings().set('__vi_external_disable', get_setting('git_status_disable_vintageous') is True)
 
-            for key, val in list(GIT_STATUS_VIEW_SETTINGS.items()):
+            for key, val in GIT_STATUS_VIEW_SETTINGS.items():
                 view.settings().set(key, val)
 
         if view is not None:
@@ -1028,18 +1027,6 @@ class GitStatusBarUpdater(threading.Thread, GitCmd):
 class GitStatusBarEventListener(EventListener, GitCmd):
     _lpop = False
 
-    def on_activated(self, view):
-        if sublime.version() < '3000':
-            self.set_status(view)
-
-    def on_load(self, view):
-        if sublime.version() < '3000':
-            self.set_status(view)
-
-    def on_post_save(self, view):
-        if sublime.version() < '3000':
-            self.set_status(view, invalidate=True)
-
     def on_activated_async(self, view):
         self.set_status(view)
 
@@ -1236,12 +1223,12 @@ class GitStatusOpenFileCommand(TextCommand, GitStatusTextCmd):
 
 class GitStatusIgnoreCommand(TextCommand, GitStatusTextCmd):
 
-    IGNORE_TRACKED = (u"The following files have already been added to git. "
-                      u"Adding them to .gitignore will not exclude them from being tracked by git. "
-                      u"Are you sure you want to continue?")
-    IGNORE_CONFIRMATION = u"Are you sure you want add the following patterns to .gitignore?"
-    IGNORE_BUTTON = u"Add to .gitignore"
-    IGNORE_NO_FILES = u"No files selected for ignore."
+    IGNORE_TRACKED = ("The following files have already been added to git. "
+                      "Adding them to .gitignore will not exclude them from being tracked by git. "
+                      "Are you sure you want to continue?")
+    IGNORE_CONFIRMATION = "Are you sure you want add the following patterns to .gitignore?"
+    IGNORE_BUTTON = "Add to .gitignore"
+    IGNORE_NO_FILES = "No files selected for ignore."
     IGNORE_LABEL = "Ignore pattern:"
 
     def run(self, edit, ask=True, edit_pattern=False):
@@ -1294,7 +1281,7 @@ class GitStatusIgnoreCommand(TextCommand, GitStatusTextCmd):
         return self.confirm(self.IGNORE_CONFIRMATION, patterns, self.IGNORE_BUTTON)
 
     def confirm_tracked(self, patterns):
-        return self.confirm(self.IGNORE_TRACKED, patterns, u"Continue")
+        return self.confirm(self.IGNORE_TRACKED, patterns, "Continue")
 
     def confirm(self, message, patterns, button):
         msg = message

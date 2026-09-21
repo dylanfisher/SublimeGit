@@ -1,4 +1,3 @@
-# coding: utf-8
 import re
 from datetime import datetime
 import sublime
@@ -161,7 +160,7 @@ class GitBlameRefreshCommand(TextCommand, GitCmd):
 
     def format_blame(self, commits, lines):
         content = []
-        template = u"{boundary}{sha} {file}({author} {date}) {line}"
+        template = "{boundary}{sha} {file}({author} {date}) {line}"
 
         files = set(c.get('filename') for _, c in commits.items() if c.get('filename'))
         max_file = max(len(f) for f in files)
