@@ -15,8 +15,8 @@ import sgit.cmd
 import sgit.status
 from sgit.cmd import Cmd, GitCmd, repo_lock, is_network_command
 from sgit.checkout import GitCheckoutCurrentFileCommand, GitCheckoutCommitCommand
-from sgit.commit import (GitCommitAmendCommand, GitCommitEventListener, GitCommitPerformCommand,
-                         GitQuickCommitCommand, commit_output)
+from sgit.commit import (GitCommit, GitCommitAmendCommand, GitCommitEventListener, GitCommitPerformCommand,
+                         GitQuickCommitCommand, commit_output, GIT_STATUS_COMMITTING)
 from sgit.custom import GitCustomCommand
 from sgit.helpers import GitDiffHelper, GitLogHelper, LOAD_MORE_COMMITS, new_file_diff
 from sgit.log import (GitLogGraphRefreshCommand, GitLogGraphWriteCommand, GitLogGraphShowCommand,
@@ -211,6 +211,64 @@ class TestCommitOffTheUiThread(object):
         flush()
         assert tmp_repo.git('log', '-1', '--format=%s') == 'the message'
         assert ('git_status', {'refresh_only': True}) in window.commands
+
+    def _commit_setup(self, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('a.txt', 'staged\n')
+        tmp_repo.git('add', 'a.txt')
+        window = window_for(tmp_repo)
+        status = sublime.View(window=window, settings={'git_view': 'status', 'git_repo': tmp_repo.path})
+        window._views.append(status)
+        commit = sublime.View(window=window, settings={'git_view': 'commit', 'git_repo': tmp_repo.path},
+                              content='the message\n')
+        GitCommit.windows[commit.id()] = (window, False, False)
+        return window, status, commit
+
+    def test_status_view_shows_a_placeholder_until_the_commit_lands(self, settings, tmp_repo, monkeypatch, flush):
+        workers = []
+        monkeypatch.setattr(sgit.status, 'run_in_thread', workers.append)
+        window, status, commit = self._commit_setup(tmp_repo)
+
+        try:
+            GitCommitEventListener().on_pre_close(commit)
+        finally:
+            GitCommit.windows.clear()
+        [(name, args)] = window.commands
+        assert name == 'git_commit_perform'
+        GitCommitPerformCommand(window).run(**args)
+        assert status.commands == [('git_status_write', {'content': GIT_STATUS_COMMITTING, 'goto': 'point:0'})]
+
+        # focusing the status view mid-commit does not bring back the old files
+        del status.commands[:]
+        GitStatusRefreshCommand(status).run(None)
+        assert len(workers) == 1  # just the commit
+
+        workers.pop()()
+        flush()
+        assert tmp_repo.git('log', '-1', '--format=%s') == 'the message'
+        assert ('git_status', {'refresh_only': True}) in window.commands
+        GitStatusRefreshCommand(status).run(None)
+        assert len(workers) == 1  # refreshes again
+
+    def test_a_failed_commit_worker_releases_the_status_view(self, settings, tmp_repo, monkeypatch, flush):
+        workers = []
+        monkeypatch.setattr(sgit.status, 'run_in_thread', workers.append)
+        monkeypatch.setattr(GitCommitPerformCommand, 'git', lambda *a, **kw: 1 / 0)
+        window, status, commit = self._commit_setup(tmp_repo)
+
+        try:
+            GitCommitEventListener().on_pre_close(commit)
+        finally:
+            GitCommit.windows.clear()
+        [(name, args)] = window.commands
+        assert name == 'git_commit_perform'
+        GitCommitPerformCommand(window).run(**args)
+        workers.pop()()
+        flush()
+
+        assert ('git_status', {'refresh_only': True}) in window.commands
+        GitStatusRefreshCommand(status).run(None)
+        assert len(workers) == 1
 
     def test_merge_runs_in_the_worker(self, settings, tmp_repo, monkeypatch, flush):
         workers = []

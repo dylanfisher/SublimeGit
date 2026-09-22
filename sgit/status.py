@@ -572,13 +572,13 @@ class _Running(object):
         self.alive = False
 
 
-def run_async(work, on_done, message=None):
+def run_async(work, on_done, message=None, on_error=None):
     """Run ``work()`` off the UI thread, then ``on_done(result)`` on it.
 
     For slow git commands started from the UI (commit hooks, merge,
     rebase). ``message`` is shown with a spinner in the status bar while
     ``work`` runs. If ``work`` raises, the error is logged and shown, and
-    ``on_done`` is not called.
+    ``on_error()`` is called on the UI thread instead of ``on_done``.
     """
     running = _Running()
 
@@ -588,6 +588,8 @@ def run_async(work, on_done, message=None):
         except Exception as e:
             logger.warning('background git command failed', exc_info=True)
             sublime.set_timeout(partial(sublime.error_message, str(e) or repr(e)), 0)
+            if on_error is not None:
+                sublime.set_timeout(on_error, 0)
         else:
             sublime.set_timeout(partial(on_done, result), 0)
         finally:
@@ -632,6 +634,11 @@ class _ViewRefreshState(object):
             self.running.add(view_id)
             return generation
 
+    def invalidate(self, view_id):
+        """Make the result of any in-flight worker for ``view_id`` stale."""
+        with self.lock:
+            self.generation[view_id] = self.generation.get(view_id, 0) + 1
+
     def is_current(self, view_id, generation):
         with self.lock:
             return self.generation.get(view_id) == generation
@@ -665,14 +672,34 @@ _refresh_state = _ViewRefreshState()
 
 
 def reset_view_refresh_state():
-    """Forget all view refresh generations, in-flight workers and reruns (tests)."""
+    """Forget all view refresh generations, in-flight workers, reruns and
+    busy repos (tests)."""
     with _refresh_state.lock:
         _refresh_state.reset()
+    _busy_repos.clear()
 
 
 def forget_view_refresh(view_id):
     """Drop the refresh bookkeeping of a view that is being closed."""
     _refresh_state.forget(view_id)
+
+
+# {repo: placeholder}: repos with a commit in flight. Their status view shows
+# the placeholder and skips refreshes until the commit lands, instead of
+# showing the files about to be committed as still staged.
+_busy_repos = {}
+
+
+def set_status_busy(window, repo, placeholder):
+    _busy_repos[repo] = placeholder
+    view = find_view_by_settings(window, git_view='status', git_repo=repo)
+    if view is not None:
+        _refresh_state.invalidate(view.id())
+        view.run_command('git_status_write', {'content': placeholder, 'goto': 'point:0'})
+
+
+def clear_status_busy(repo):
+    _busy_repos.pop(repo, None)
 
 
 class GitViewRefreshCmd(object):
@@ -789,7 +816,7 @@ class GitStatusRefreshCommand(TextCommand, GitViewRefreshCmd, GitStatusBuilder):
             return
 
         repo = self.get_repo()
-        if not repo:
+        if not repo or repo in _busy_repos:
             return
 
         self.request_refresh({

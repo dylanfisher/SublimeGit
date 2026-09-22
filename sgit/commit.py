@@ -6,13 +6,15 @@ from sublime_plugin import WindowCommand, TextCommand, EventListener
 from .util import find_view_by_settings, noop, get_setting
 from .cmd import GitCmd
 from .helpers import GitStatusHelper, GitBranchHelper
-from .status import GIT_WORKING_DIR_CLEAN, run_async
+from .status import GIT_WORKING_DIR_CLEAN, run_async, set_status_busy, clear_status_busy
 
 
 GIT_COMMIT_VIEW_TITLE = "COMMIT_EDITMSG"
 GIT_COMMIT_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Commit Message.sublime-syntax'
 
 GIT_NOTHING_STAGED = 'No changes added to commit. Use s on files/sections in the status view to stage changes.'
+GIT_STATUS_COMMITTING = "Committing...\n"
+
 GIT_COMMIT_TEMPLATE = """{old_msg}
 # Please enter the commit message for your changes. Lines starting
 # with '#' will be ignored, and an empty message aborts the commit.
@@ -90,15 +92,21 @@ class GitCommitWindowCmd(GitCmd, GitStatusHelper):
 
     def run_commit(self, window, repo, cmd, message):
         """Run ``git commit`` off the UI thread (pre-commit hooks can take a
-        while), then show its output and refresh the status view."""
+        while), then show its output and refresh the status view. Until
+        then the status view shows a placeholder, not the pre-commit files."""
         def work():
             return self.git(cmd, stdin=message, cwd=repo)
 
-        def done(result):
-            show_commit_panel(window, commit_output(*result))
+        def refresh():
+            clear_status_busy(repo)
             window.run_command('git_status', {'refresh_only': True})
 
-        run_async(work, done, 'Committing...')
+        def done(result):
+            show_commit_panel(window, commit_output(*result))
+            refresh()
+
+        set_status_busy(window, repo, GIT_STATUS_COMMITTING)
+        run_async(work, done, 'Committing...', on_error=refresh)
 
 
 def show_commit_panel(window, content):
@@ -222,7 +230,9 @@ class GitCommitEventListener(EventListener):
         if get_setting('git_commit_pedantic') is True:
             self.mark_pedantic(view)
 
-    def on_close(self, view):
+    def on_pre_close(self, view):
+        # pre_close, not close: the status view behind this one must show
+        # the "Committing..." placeholder before it is revealed
         if view.settings().get('git_view') == 'commit' and view.id() in GitCommit.windows:
             message = view.substr(sublime.Region(0, view.size()))
             window, add, amend = GitCommit.windows[view.id()]
