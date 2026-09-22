@@ -28,7 +28,7 @@
 
     /*** GIT STATUS ***/
     // Refresh
-    { "keys": ["r"], "command": "git_status_refresh",
+    { "keys": ["r"], "command": "git_status_refresh", "args": {"goto": "file:1"},
         "context": [{ "key": "selector", "operator": "equal", "operand": "text.git-status" }]
     },
 
