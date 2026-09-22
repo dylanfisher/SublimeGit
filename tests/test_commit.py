@@ -95,6 +95,10 @@ class TestGitCommitCommand(object):
 
 class TestGitQuickCommitCommand(object):
 
+    @pytest.fixture(autouse=True)
+    def _inline(self, inline_threads):
+        """The commit itself runs through run_async; run it inline."""
+
     def test_open_spawns_one_process(self, settings, tmp_repo, window, commands):
         tmp_repo.commit('a.txt', 'a\n')
         tmp_repo.write('a.txt', 'changed\n')

@@ -6,8 +6,8 @@ from sublime_plugin import WindowCommand, TextCommand, EventListener
 
 from .util import noop, find_view_by_settings, get_setting
 from .cmd import GitCmd
-from .helpers import GitLogHelper
-from .status import GitViewRefreshCmd, forget_view_refresh
+from .helpers import GitLogHelper, get_log_max_count
+from .status import GitViewRefreshCmd, forget_view_refresh, buffer_equals
 
 
 GIT_LOG_VIEW_TITLE_PREFIX = '*git-log*: '
@@ -28,6 +28,10 @@ GIT_LOG_GRAPH_VIEW_SETTINGS = {
 # have no hash and are skipped.
 GIT_LOG_GRAPH_LINE_RE = re.compile(r'^[ |/\\_*.\-]*?([0-9a-f]{7,40}) - \(')
 
+# Last line of a graph log cut off at git_log_max_count; enter on it loads more.
+GIT_LOG_LOAD_MORE = '-- Showing the latest {count} commits. Press enter on this line to load {step} more --'
+GIT_LOG_LOAD_MORE_RE = re.compile(r'^-- Showing the latest \d+ commits\.')
+
 
 class GitLogCommand(WindowCommand, GitCmd):
     """
@@ -45,6 +49,9 @@ class GitLogCommand(WindowCommand, GitCmd):
       confirm when this would open more than 5 tabs, unless the
       **git_blame_warn_multiple_tabs** setting is false.
     * ``r``: Refresh the log, keeping the caret and scroll position.
+
+    At most **git_log_max_count** commits are loaded; when there are more,
+    ``enter`` on the last line loads that many more.
 
     Use ``Git: Quick Log`` for the quick-panel version of the log.
     """
@@ -96,22 +103,43 @@ class GitLogGraphRefreshCommand(TextCommand, GitViewRefreshCmd, GitCmd):
             'repo': repo,
             'point': point,
             'viewport': list(self.view.viewport_position()),
+            'max_count': self.view.settings().get('git_log_max_count') or get_log_max_count(),
         })
 
     def gather(self, request):
-        return self.get_log_graph(request['repo'])
+        return self.get_log_graph(request['repo'], request.get('max_count'))
 
-    def get_log_graph(self, repo):
+    def get_log_graph(self, repo, max_count=None):
         if self.git_exit_code(['rev-parse', '--verify', '--quiet', 'HEAD'], cwd=repo) != 0:
             return 'No commits yet\n'
         cmd = ['log', '--graph', '--abbrev-commit', '--decorate', '--date=relative',
-               '--no-color', '--format=format:%s' % GIT_LOG_GRAPH_FORMAT]
+               '--no-color', '--format=format:%s' % GIT_LOG_GRAPH_FORMAT,
+               # one extra commit tells whether there is anything left to load
+               ('--max-count=%d' % (max_count + 1)) if max_count else None]
         exit, stdout, stderr = self.git(cmd, cwd=repo)
         if exit != 0:
             return stderr or stdout
         if not stdout.endswith('\n'):
             stdout += '\n'
+        if max_count:
+            stdout = self.truncate_log_graph(stdout, max_count)
         return stdout
+
+    @staticmethod
+    def truncate_log_graph(log, max_count):
+        """Cut ``log`` before its ``max_count + 1``-th commit line, if there
+        is one, and end it with the "load more" line."""
+        lines = log.split('\n')
+        commits = 0
+        for idx, line in enumerate(lines):
+            if GIT_LOG_GRAPH_LINE_RE.match(line):
+                commits += 1
+                if commits > max_count:
+                    step = get_log_max_count() or max_count
+                    kept = lines[:idx]
+                    kept.append(GIT_LOG_LOAD_MORE.format(count=max_count, step=step))
+                    return '\n'.join(kept) + '\n'
+        return log
 
     def deliver(self, request, content):
         if content is None:
@@ -131,6 +159,8 @@ class GitLogGraphWriteCommand(TextCommand):
         return False
 
     def run(self, edit, content='', point=None, viewport=None):
+        if buffer_equals(self.view, content):
+            return
         self.view.set_read_only(False)
         self.view.replace(edit, sublime.Region(0, self.view.size()), content)
         self.view.set_read_only(True)
@@ -166,9 +196,15 @@ class GitLogGraphShowCommand(TextCommand, GitCmd):
         match = GIT_LOG_GRAPH_LINE_RE.match(text)
         return match.group(1) if match else None
 
+    def on_load_more_line(self):
+        sel = self.view.sel()
+        return bool(sel) and bool(GIT_LOG_LOAD_MORE_RE.match(self.view.substr(self.view.line(sel[0].begin()))))
+
     def run(self, edit):
         commits = self.commits_from_selection()
         if not commits:
+            if self.on_load_more_line():
+                return self.view.run_command('git_log_graph_load_more')
             return sublime.error_message('No commits selected.')
 
         if len(commits) > 5 and get_setting('git_blame_warn_multiple_tabs', True):
@@ -185,10 +221,25 @@ class GitLogGraphShowCommand(TextCommand, GitCmd):
             window.run_command('git_show', {'repo': repo, 'obj': sha})
 
 
+class GitLogGraphLoadMoreCommand(TextCommand):
+    """Load another ``git_log_max_count`` commits into the graph log view."""
+
+    def is_visible(self):
+        return False
+
+    def run(self, edit):
+        settings = self.view.settings()
+        step = get_log_max_count()
+        if not step:
+            return
+        settings.set('git_log_max_count', (settings.get('git_log_max_count') or step) + step)
+        self.view.run_command('git_log_graph_refresh')
+
+
 class GitLogGraphEventListener(EventListener):
 
     def on_pre_close(self, view):
-        if view.settings().get('git_view') == 'log-graph':
+        if view.settings().get('git_view') in ('log-graph', 'log', 'show'):
             forget_view_refresh(view.id())
 
 
@@ -205,16 +256,10 @@ class GitQuickLogCommand(WindowCommand, GitCmd, GitLogHelper):
         if not repo:
             return
 
-        log = self.get_quick_log(repo)
-        hashes, choices = self.format_quick_log(log)
-
-        def on_done(idx):
-            if idx == -1:
-                return
-            commit = hashes[idx]
+        def on_commit(commit):
             self.window.run_command('git_show', {'obj': commit, 'repo': repo})
 
-        self.window.show_quick_panel(choices, on_done)
+        self.show_quick_log_panel(self.window, repo, on_commit)
 
 
 class GitQuickLogCurrentFileCommand(TextCommand, GitCmd, GitLogHelper):
@@ -223,24 +268,20 @@ class GitQuickLogCurrentFileCommand(TextCommand, GitCmd, GitLogHelper):
     """
 
     def run(self, edit):
+        window = self.view.window()
         filename = self.view.file_name()
         if not filename:
-            self.window.show_quick_panel(['No log for file'], noop)
+            window.show_quick_panel(['No log for file'], noop)
+            return
 
         repo = self.get_repo()
         if not repo:
             return
 
-        log = self.get_quick_log(repo, path=filename, follow=True)
-        hashes, choices = self.format_quick_log(log)
+        def on_commit(commit):
+            window.run_command('git_show', {'obj': commit, 'repo': repo})
 
-        def on_done(idx):
-            if idx == -1:
-                return
-            commit = hashes[idx]
-            self.view.window().run_command('git_show', {'obj': commit, 'repo': repo})
-
-        self.view.window().show_quick_panel(choices, on_done)
+        self.show_quick_log_panel(window, repo, on_commit, path=filename, follow=True)
 
 
 class GitLogCurrentFileCommand(TextCommand, GitCmd):
@@ -283,7 +324,9 @@ class GitLogCurrentFileCommand(TextCommand, GitCmd):
         view.run_command('git_log_refresh')
 
 
-class GitLogRefreshCommand(TextCommand, GitCmd):
+class GitLogRefreshCommand(TextCommand, GitViewRefreshCmd, GitCmd):
+    """Refresh the file log view: ``git log --follow --patch`` runs in a
+    worker thread, the buffer is written by ``git_log_write``."""
 
     def is_visible(self):
         return False
@@ -294,6 +337,10 @@ class GitLogRefreshCommand(TextCommand, GitCmd):
         if not repo:
             return
 
+        self.request_refresh({'repo': repo, 'relpath': relpath})
+
+    def gather(self, request):
+        repo, relpath = request['repo'], request['relpath']
         cmd = ['log', '--no-color', '--format=medium', '--patch', '--follow' if relpath else None]
         if relpath:
             cmd.extend(['--', relpath])
@@ -301,11 +348,24 @@ class GitLogRefreshCommand(TextCommand, GitCmd):
         content = stdout if exit == 0 else stderr
         if exit == 0 and not stdout.strip():
             content = "No commits for %s\n" % (relpath or 'HEAD')
+        return content
 
+    def deliver(self, request, content):
+        self.view.run_command('git_log_write', {'content': content})
+
+
+class GitLogWriteCommand(TextCommand):
+    """Apply phase of ``git_log_refresh`` (and ``git_show_refresh``): replace
+    the buffer and put the caret at the top. Hidden."""
+
+    def is_visible(self):
+        return False
+
+    def run(self, edit, content=''):
+        if buffer_equals(self.view, content):
+            return
         self.view.set_read_only(False)
-        if self.view.size() > 0:
-            self.view.erase(edit, sublime.Region(0, self.view.size()))
-        self.view.insert(edit, 0, content)
+        self.view.replace(edit, sublime.Region(0, self.view.size()), content)
         self.view.set_read_only(True)
         self.view.sel().clear()
         self.view.sel().add(sublime.Region(0))

@@ -40,7 +40,8 @@ Stashes
 
 Log View
 --------
-* ``enter``: Show the selected commit(s)
+* ``enter``: Show the selected commit(s). On the last line of a log that
+  was cut off at ``git_log_max_count`` commits, load that many more
 * ``r``: Refresh the log
 
 Blame View

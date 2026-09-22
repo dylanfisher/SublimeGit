@@ -78,6 +78,7 @@ class GitFetchCommand(WindowCommand, GitCmd, GitRemoteHelper):
     def on_data(self, d):
         if not self.panel_shown:
             self.window.run_command('show_panel', {'panel': 'output.git-fetch'})
+            self.panel_shown = True
         self.panel.run_command('git_panel_append', {'content': d, 'scroll': True})
 
 
@@ -170,6 +171,7 @@ class GitPushCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
     def on_data(self, d):
         if not self.panel_shown:
             self.window.run_command('show_panel', {'panel': 'output.git-push'})
+            self.panel_shown = True
         self.panel.run_command('git_panel_append', {'content': d, 'scroll': True})
 
 
@@ -235,6 +237,7 @@ class GitPullCurrentBranchCommand(WindowCommand, GitCmd, GitRemoteHelper):
     def on_data(self, d):
         if not self.panel_shown:
             self.window.run_command('show_panel', {'panel': 'output.git-pull'})
+            self.panel_shown = True
         self.panel.run_command('git_panel_append', {'content': d, 'scroll': True})
 
 
@@ -274,6 +277,7 @@ class GitPushCommand(WindowCommand, GitCmd, GitRemoteHelper):
     def on_data(self, d):
         if not self.panel_shown:
             self.window.run_command('show_panel', {'panel': 'output.git-push'})
+            self.panel_shown = True
         self.panel.run_command('git_panel_append', {'content': d, 'scroll': True})
 
 
@@ -313,6 +317,7 @@ class GitPullCommand(WindowCommand, GitCmd, GitRemoteHelper):
     def on_data(self, d):
         if not self.panel_shown:
             self.window.run_command('show_panel', {'panel': 'output.git-pull'})
+            self.panel_shown = True
         self.panel.run_command('git_panel_append', {'content': d, 'scroll': True})
 
 
@@ -509,4 +514,5 @@ class GitRemoteCommand(WindowCommand, GitCmd, GitRemoteHelper):
     def on_data(self, d):
         if not self.panel_shown:
             self.window.run_command('show_panel', {'panel': 'output.git-remote'})
+            self.panel_shown = True
         self.panel.run_command('git_panel_append', {'content': d, 'scroll': True})

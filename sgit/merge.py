@@ -6,6 +6,7 @@ from sublime_plugin import WindowCommand
 from .util import get_setting
 from .cmd import GitCmd
 from .helpers import GitBranchHelper, GitErrorHelper
+from .status import run_async
 
 
 GIT_MERGE_IN_PROGRESS = ("A merge is already in progress. Finish it with Git: Commit, "
@@ -80,8 +81,9 @@ class GitMergeCommand(WindowCommand, GitMergeWindowCmd):
         branch = choices[idx]
         cmd.append(branch)
 
-        exit, stdout, stderr = self.git(cmd, cwd=repo)
-        self.show_result('git-merge', exit, stdout, stderr)
+        run_async(lambda: self.git(cmd, cwd=repo),
+                  lambda result: self.show_result('git-merge', *result),
+                  'Merging %s' % branch)
 
 
 class GitMergeAbortCommand(WindowCommand, GitMergeWindowCmd):
@@ -159,9 +161,12 @@ class GitRebaseCommand(WindowCommand, GitMergeWindowCmd):
 
         cmd.append(names[idx])
 
-        exit, stdout, stderr = self.git(cmd, cwd=repo)
-        # git rebase reports "Successfully rebased ..." on stderr
-        self.show_result('git-rebase', exit, stdout + stderr, '')
+        def done(result):
+            exit, stdout, stderr = result
+            # git rebase reports "Successfully rebased ..." on stderr
+            self.show_result('git-rebase', exit, stdout + stderr, '')
+
+        run_async(lambda: self.git(cmd, cwd=repo), done, 'Rebasing onto %s' % names[idx])
 
 
 class GitRebaseAbortCommand(WindowCommand, GitMergeWindowCmd):

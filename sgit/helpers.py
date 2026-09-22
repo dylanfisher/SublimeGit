@@ -1,6 +1,8 @@
 import re
 import os
 import html
+import stat
+import hashlib
 import logging
 import sublime
 
@@ -282,6 +284,11 @@ class GitBranchHelper(object):
         merge_head, rebase_merge, rebase_apply = self.get_git_paths(repo, 'MERGE_HEAD', 'rebase-merge', 'rebase-apply')
         return (os.path.exists(merge_head),
                 os.path.isdir(rebase_merge) or os.path.isdir(rebase_apply))
+
+    def get_remote_branches_containing(self, repo, rev='HEAD'):
+        """Remote-tracking branches that contain ``rev``, i.e. where it has
+        already been pushed to."""
+        return self.git_lines(['branch', '-r', '--contains', rev, '--format=%(refname:short)'], cwd=repo)
 
     def get_branches(self, repo, remotes=False):
         lines = self.git_lines(['branch', '--list', '--no-color', '--remotes' if remotes else None], cwd=repo)
@@ -574,11 +581,83 @@ class GitDiffHelper(object):
         untracked = self.git_lines(['ls-files', '--others', '--exclude-standard', '--', path], cwd=repo)
         diffs = []
         for f in untracked:
-            if f:
-                diffs.append(self.git_string(['diff', '--no-index',
-                                              '--unified=%s' % unified if unified else None,
-                                              '--', os.devnull, f], cwd=repo, strip=False))
+            if not f:
+                continue
+            # Built in Python so a new folder with hundreds of files does not
+            # start hundreds of git processes. Anything the Python version
+            # does not reproduce exactly (binary files, symlinks, paths git
+            # would quote) still goes through git.
+            diff = new_file_diff(repo, f, get_setting('encoding', 'utf-8'),
+                                 get_setting('fallback_encodings', []))
+            if diff is None:
+                diff = self.git_string(['diff', '--no-index',
+                                        '--unified=%s' % unified if unified else None,
+                                        '--', os.devnull, f], cwd=repo, strip=False)
+            diffs.append(diff)
         return ''.join(diffs)
+
+
+# Paths that ``git diff`` prints C-quoted (with core.quotePath, the default):
+# double quotes, backslashes, control characters and anything non-ASCII.
+PATH_NEEDS_QUOTING_RE = re.compile(r'["\\\x00-\x1f\x7f-\U0010ffff]')
+
+# Git treats a file as binary when there is a NUL byte in its first 8000 bytes.
+BINARY_CHECK_BYTES = 8000
+
+
+def new_file_diff(repo, relpath, encoding, fallback=None):
+    """The ``git diff --no-index /dev/null <relpath>`` of an untracked file,
+    built without starting git, or ``None`` when the file needs git to get
+    it exactly right (not a regular file, binary, undecodable, or a path git
+    would quote)."""
+    if PATH_NEEDS_QUOTING_RE.search(relpath):
+        return None
+
+    fullpath = os.path.join(repo, relpath)
+    try:
+        st = os.lstat(fullpath)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        with open(fullpath, 'rb') as f:
+            data = f.read()
+    except (IOError, OSError):
+        return None
+
+    if b'\0' in data[:BINARY_CHECK_BYTES]:
+        return None
+
+    text = None
+    for enc in [encoding] + list(fallback or []):
+        try:
+            text = data.decode(enc)
+            break
+        except (UnicodeDecodeError, LookupError):
+            pass
+    if text is None:
+        return None
+
+    mode = '100755' if st.st_mode & stat.S_IXUSR else '100644'
+    blob = hashlib.sha1(('blob %d\0' % len(data)).encode('ascii') + data).hexdigest()
+
+    out = ['diff --git a/%s b/%s\n' % (relpath, relpath),
+           'new file mode %s\n' % mode,
+           'index 0000000..%s\n' % blob[:7]]
+    if not text:
+        return ''.join(out)
+
+    lines = text.split('\n')
+    missing_newline = lines[-1] != ''
+    if not missing_newline:
+        lines.pop()
+
+    out.append('--- /dev/null\n')
+    # like GNU diff, git ends a name containing a space with a tab
+    out.append('+++ b/%s%s\n' % (relpath, '\t' if ' ' in relpath else ''))
+    out.append('@@ -0,0 +1 @@\n' if len(lines) == 1 else '@@ -0,0 +1,%d @@\n' % len(lines))
+    out.extend('+%s\n' % line for line in lines)
+    if missing_newline:
+        out.append('\\ No newline at end of file\n')
+    return ''.join(out)
 
 
 class GitShowHelper(object):
@@ -597,8 +676,10 @@ class GitLogHelper(object):
                             '%ar'    # auth date relative
                             '%x04')
 
-    def get_quick_log(self, repo, path=None, follow=False):
+    def get_quick_log(self, repo, path=None, follow=False, max_count=None):
         cmd = ['log', '--no-color', '--date=local', '--format=%s' % self.GIT_QUICK_LOG_FORMAT]
+        if max_count:
+            cmd.append('--max-count=%d' % max_count)
         if follow:
             cmd.append('--follow')
         if path:
@@ -624,6 +705,57 @@ class GitLogHelper(object):
                 details=format_details('%s by %s <%s>' % (sha[0:8], name, email), '%s (%s)' % (reldt, dt)),
                 kind=KIND_COMMIT))
         return hashes, choices
+
+    def show_quick_log_panel(self, window, repo, on_commit, path=None, follow=False, max_count=None):
+        """Show the log in a quick panel and call ``on_commit(sha)`` with the
+        picked commit.
+
+        At most ``git_log_max_count`` commits are loaded. When there are
+        more, a last "Load more commits" item reopens the panel with that
+        many more, with the same commit highlighted.
+        """
+        step = get_log_max_count()
+        max_count = max_count or step
+        # one extra commit tells whether there is anything left to load
+        log = self.get_quick_log(repo, path=path, follow=follow,
+                                 max_count=max_count + 1 if max_count else None)
+        more = bool(max_count) and len(log) > max_count
+        if more:
+            log = log[:max_count]
+        hashes, choices = self.format_quick_log(log)
+        if more:
+            choices.append(sublime.QuickPanelItem(
+                LOAD_MORE_COMMITS,
+                details=format_details('Showing the latest %d commits' % max_count),
+                kind=KIND_COMMIT))
+
+        def on_done(idx):
+            if idx == -1:
+                return
+            if more and idx == len(hashes):
+                sublime.set_timeout(lambda: self.show_quick_log_panel(
+                    window, repo, on_commit, path=path, follow=follow, max_count=max_count + step), 10)
+                return
+            on_commit(hashes[idx])
+
+        selected = min(max_count - step, len(choices) - 1) if max_count > step else -1
+        window.show_quick_panel(choices, on_done, selected_index=selected)
+
+
+LOAD_MORE_COMMITS = 'Load more commits...'
+
+DEFAULT_LOG_MAX_COUNT = 1000
+
+
+def get_log_max_count():
+    """The ``git_log_max_count`` setting: how many commits a log loads at a
+    time. ``0``/``null`` means no limit."""
+    value = get_setting('git_log_max_count', DEFAULT_LOG_MAX_COUNT)
+    try:
+        value = int(value or 0)
+    except (TypeError, ValueError):
+        return DEFAULT_LOG_MAX_COUNT
+    return max(value, 0)
 
 
 class GitTagHelper(object):

@@ -38,3 +38,6 @@
 ;                                                    ^ meta.git-log.line comment.other.git-log.separator
 ;                                                      ^^^^^^^^^^^ meta.git-log.line support.type.git-log.author
 ;                                                                 ^^^^^^^^^^^^ meta.git-log.line string.other.git-log.refs
+-- Showing the latest 1000 commits. Press enter on this line to load 1000 more --
+;<- text.git-log meta.git-log.load-more comment.other.git-log.load-more - meta.git-log.line
+;^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.git-log.load-more comment.other.git-log.load-more

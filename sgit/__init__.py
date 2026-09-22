@@ -23,7 +23,8 @@ from .gc import GitGarbageCollectCommand
 from .log import (GitLogCommand, GitLogGraphRefreshCommand, GitLogGraphWriteCommand,
                   GitLogGraphShowCommand, GitLogGraphEventListener,
                   GitQuickLogCommand, GitQuickLogCurrentFileCommand,
-                  GitLogCurrentFileCommand, GitLogRefreshCommand)
+                  GitLogCurrentFileCommand, GitLogRefreshCommand, GitLogWriteCommand,
+                  GitLogGraphLoadMoreCommand)
 
 from .blame import (GitBlameCommand, GitBlameRefreshCommand, GitBlameShowCommand,
                     GitBlameBlameCommand)

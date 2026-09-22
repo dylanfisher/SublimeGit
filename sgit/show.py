@@ -5,6 +5,7 @@ from sublime_plugin import WindowCommand, TextCommand
 from .util import noop, find_view_by_settings
 from .cmd import GitCmd
 from .helpers import GitShowHelper
+from .status import GitViewRefreshCmd
 
 
 GIT_SHOW_TITLE_PREFIX = '*git-show*: '
@@ -49,7 +50,9 @@ class GitShowCommand(WindowCommand, GitCmd):
         view.run_command('git_show_refresh', {'obj': obj})
 
 
-class GitShowRefreshCommand(TextCommand, GitCmd, GitShowHelper):
+class GitShowRefreshCommand(TextCommand, GitViewRefreshCmd, GitCmd, GitShowHelper):
+    """Fill the show view: ``git show`` runs in a worker thread, the buffer
+    is written by ``git_log_write`` on the main thread."""
 
     def is_visible(self):
         return False
@@ -57,11 +60,13 @@ class GitShowRefreshCommand(TextCommand, GitCmd, GitShowHelper):
     def run(self, edit, obj=None):
         obj = obj or self.view.settings().get('git_show_obj')
         repo = self.view.settings().get('git_repo')
-        show = self.get_show(repo, obj)
+        if not repo or not obj:
+            return
+        self.request_refresh({'repo': repo, 'obj': obj})
 
+    def gather(self, request):
+        return self.get_show(request['repo'], request['obj'])
+
+    def deliver(self, request, show):
         if show:
-            self.view.set_read_only(False)
-            if self.view.size() > 0:
-                self.view.erase(edit, sublime.Region(0, self.view.size()))
-            self.view.insert(edit, 0, show)
-            self.view.set_read_only(True)
+            self.view.run_command('git_log_write', {'content': show})

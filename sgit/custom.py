@@ -101,6 +101,7 @@ class GitCustomCommand(WindowCommand, GitCmd, GitErrorHelper):
         if self.output == "panel":
             if not self.output_panel_shown:
                 self.window.run_command('show_panel', {'panel': 'output.git-custom'})
+                self.output_panel_shown = True
             self.output_panel.run_command('git_panel_append', {'content': d, 'scroll': True})
         elif self.output == "view":
             self.output_view.run_command('git_custom_output', {'content': d})

@@ -5,12 +5,12 @@ import sublime
 from sublime_plugin import WindowCommand, TextCommand, EventListener
 
 from .util import find_view_by_settings, get_setting
-from .cmd import GitCmd
+from .cmd import GitCmd, read_only_git
 from .helpers import GitDiffHelper, GitErrorHelper, GitStatusHelper
-from .status import GitViewRefreshCmd, forget_view_refresh
+from .status import GitViewRefreshCmd, forget_view_refresh, buffer_equals
 
 
-RE_DIFF_HEAD = re.compile(r'(---|\+\+\+){3} (a|b)/(dev/null)?')
+RE_DIFF_HEAD = re.compile(r'(---|\+\+\+) (a/|b/|/dev/null)')
 
 
 GIT_DIFF_TITLE = '*git-diff*'
@@ -267,8 +267,9 @@ class GitDiffRefreshCommand(TextCommand, GitViewRefreshCmd, GitDiffTextCmd):
         })
 
     def gather(self, request):
-        return self.get_diff(request['repo'], request['path'], request['cached'],
-                             unified=request['unified'])
+        with read_only_git():
+            return self.get_diff(request['repo'], request['path'], request['cached'],
+                                 unified=request['unified'])
 
     def deliver(self, request, diff):
         clean = False
@@ -294,9 +295,15 @@ class GitDiffWriteCommand(TextCommand, GitDiffTextCmd):
 
     def run(self, edit, content='', clean=False, run_move=False, row=0, col=0):
         self.view.settings().set('git_diff_clean', clean)
-        self.view.set_read_only(False)
-        self.view.replace(edit, sublime.Region(0, self.view.size()), content)
-        self.view.set_read_only(True)
+        if buffer_equals(self.view, content):
+            # nothing changed (the usual refresh on focus): keep the buffer,
+            # the caret and the scroll position as they are
+            if not run_move:
+                return
+        else:
+            self.view.set_read_only(False)
+            self.view.replace(edit, sublime.Region(0, self.view.size()), content)
+            self.view.set_read_only(True)
 
         if run_move:
             self.view.run_command('git_diff_move')

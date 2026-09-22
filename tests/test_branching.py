@@ -70,6 +70,10 @@ def make_conflict(repo):
 
 class TestRebase(object):
 
+    @pytest.fixture(autouse=True)
+    def _inline(self, inline_threads):
+        """The rebase runs through run_async; run it inline (then flush)."""
+
     def test_lists_other_local_and_remote_branches(self, settings, tmp_repo):
         tmp_repo.commit('a.txt', 'a\n')
         tmp_repo.git('branch', 'feature')
@@ -95,6 +99,7 @@ class TestRebase(object):
         GitRebaseCommand(window).run()
         items, on_done = window.quick_panel
         on_done([i.trigger for i in items].index('main'))
+        sublime.flush_timeouts()
 
         assert tmp_repo.git('rev-parse', 'HEAD~1') == main
         assert tmp_repo.git('rev-parse', 'HEAD') != topic
@@ -120,6 +125,7 @@ class TestRebase(object):
 
         GitRebaseCommand(window).run()
         window.quick_panel[1](0)
+        sublime.flush_timeouts()
 
         assert len(sublime.error_messages) == 1
         assert 'CONFLICT' in sublime.error_messages[0]
@@ -419,16 +425,22 @@ class TestLogCurrentFile(object):
         assert log_view.settings().get('git_log_path') == 'new.txt'
         assert log_view.commands == [('git_log_refresh', None)]
 
-    def test_refresh_writes_patch_log(self, settings, tmp_repo):
+    def test_refresh_writes_patch_log(self, settings, tmp_repo, inline_threads, flush):
         tmp_repo.commit('old.txt', 'a\n', 'add old')
         tmp_repo.git('mv', 'old.txt', 'new.txt')
         tmp_repo.commit_all('rename to new')
-        from sgit.log import GitLogRefreshCommand
+        from sgit.log import GitLogRefreshCommand, GitLogWriteCommand
         view = sublime.View()
         view.settings().set('git_repo', tmp_repo.path)
         view.settings().set('git_log_path', 'new.txt')
 
         GitLogRefreshCommand(view).run(None)
+        flush()
+        # git ran in the worker; the buffer is only written by git_log_write
+        assert view.size() == 0
+        [(name, args)] = view.commands
+        assert name == 'git_log_write'
+        GitLogWriteCommand(view).run(None, **args)
 
         text = view.substr(sublime.Region(0, view.size()))
         assert 'rename to new' in text and 'add old' in text

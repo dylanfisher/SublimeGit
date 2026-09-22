@@ -75,6 +75,15 @@ def flush():
     return sublime.flush_timeouts
 
 
+@pytest.fixture
+def inline_threads(monkeypatch):
+    """Make ``sgit.status.run_in_thread`` (behind the async view refreshes
+    and ``run_async``) run the worker body synchronously. Results still reach
+    the main thread through ``sublime.set_timeout``, so call ``flush()``."""
+    import sgit.status
+    monkeypatch.setattr(sgit.status, 'run_in_thread', lambda fn: fn())
+
+
 def git(cwd, *args, **kwargs):
     """Run git in ``cwd`` and return stripped stdout; raises on failure."""
     check = kwargs.pop('check', True)

@@ -8,8 +8,8 @@ from functools import partial
 import sublime
 from sublime_plugin import WindowCommand, TextCommand, EventListener
 
-from .util import abbreviate_dir, find_view_by_settings, noop, get_setting, get_executable
-from .cmd import GitCmd
+from .util import abbreviate_dir, find_view_by_settings, noop, get_setting, get_executable, StatusSpinner
+from .cmd import GitCmd, read_only_git
 from .helpers import GitStatusHelper, GitRemoteHelper, GitStashHelper, GitErrorHelper
 
 
@@ -169,10 +169,27 @@ class GitStatusBuilder(GitCmd, GitStatusHelper, GitRemoteHelper, GitStashHelper)
         return status
 
 
-class GitStatusTextCmd(GitCmd):
+class GitStatusTextCmd(GitCmd, GitErrorHelper):
 
     def run(self, edit, *args):
         sublime.error_message("Unimplemented!")
+
+    # git calls whose failure the user should hear about
+    def git_checked(self, cmd, repo):
+        """Run ``cmd`` and remember its error output if it fails; the errors
+        are shown together by ``show_git_errors()``."""
+        exit, stdout, stderr = self.git(cmd, cwd=repo)
+        if exit != 0:
+            if not hasattr(self, 'git_errors'):
+                self.git_errors = []
+            self.git_errors.append(self.format_error_message((stderr or stdout).strip()))
+        return exit, stdout, stderr
+
+    def show_git_errors(self):
+        errors = [e for e in getattr(self, 'git_errors', []) if e]
+        self.git_errors = []
+        if errors:
+            sublime.error_message("\n\n".join(errors))
 
     # status update
     def update_status(self, goto=None):
@@ -542,6 +559,45 @@ def run_in_thread(fn):
     return thread
 
 
+class _Running(object):
+    """Stands in for a thread in ``StatusSpinner``: alive until ``done()``."""
+
+    def __init__(self):
+        self.alive = True
+
+    def is_alive(self):
+        return self.alive
+
+    def done(self):
+        self.alive = False
+
+
+def run_async(work, on_done, message=None):
+    """Run ``work()`` off the UI thread, then ``on_done(result)`` on it.
+
+    For slow git commands started from the UI (commit hooks, merge,
+    rebase). ``message`` is shown with a spinner in the status bar while
+    ``work`` runs. If ``work`` raises, the error is logged and shown, and
+    ``on_done`` is not called.
+    """
+    running = _Running()
+
+    def worker():
+        try:
+            result = work()
+        except Exception as e:
+            logger.warning('background git command failed', exc_info=True)
+            sublime.set_timeout(partial(sublime.error_message, str(e) or repr(e)), 0)
+        else:
+            sublime.set_timeout(partial(on_done, result), 0)
+        finally:
+            running.done()
+
+    run_in_thread(worker)
+    if message and running.is_alive():
+        sublime.set_timeout(StatusSpinner(running, message).progress, 0)
+
+
 class _ViewRefreshState(object):
     """Process-wide bookkeeping for in-flight view refreshes, guarded by ``lock``.
 
@@ -743,7 +799,8 @@ class GitStatusRefreshCommand(TextCommand, GitViewRefreshCmd, GitStatusBuilder):
         })
 
     def gather(self, request):
-        return self.build_status(request['repo'])
+        with read_only_git():
+            return self.build_status(request['repo'])
 
     def deliver(self, request, status):
         if not status:
@@ -755,6 +812,12 @@ class GitStatusRefreshCommand(TextCommand, GitViewRefreshCmd, GitStatusBuilder):
         })
 
 
+def buffer_equals(view, content):
+    """True when ``view`` already contains exactly ``content``. The size is
+    compared first so a changed buffer usually costs no substr()."""
+    return view.size() == len(content) and view.substr(sublime.Region(0, view.size())) == content
+
+
 class GitStatusWriteCommand(TextCommand, GitStatusMoveCmd):
     """Apply phase of ``git_status_refresh``: replace the buffer and place the
     caret. Hidden; only invoked from the main thread by the refresh."""
@@ -763,9 +826,16 @@ class GitStatusWriteCommand(TextCommand, GitStatusMoveCmd):
         return False
 
     def run(self, edit, content='', goto=None, viewport=None):
-        self.view.set_read_only(False)
-        self.view.replace(edit, sublime.Region(0, self.view.size()), content)
-        self.view.set_read_only(True)
+        if buffer_equals(self.view, content):
+            # Nothing changed (the usual refresh on focus): leave the buffer,
+            # the caret and the scroll position alone. An explicit goto (after
+            # staging a file, say) still moves the caret.
+            if not goto or goto.startswith('point:'):
+                return
+        else:
+            self.view.set_read_only(False)
+            self.view.replace(edit, sublime.Region(0, self.view.size()), content)
+            self.view.set_read_only(True)
 
         if goto:
             self.goto(goto)
@@ -1049,7 +1119,7 @@ class GitStatusBarUpdater(threading.Thread, GitCmd):
     def compute(self):
         """Return the status bar message, or ``None`` if nothing should be shown."""
         exit_code, stdout, _ = self.git(self.STATUS_COMMAND, cwd=self.repo, ignore_errors=True,
-                                        encoding=self.encoding, fallback=self.fallback)
+                                        encoding=self.encoding, fallback=self.fallback, read_only=True)
         if exit_code != 0:
             return None
         return format_status_bar_message(parse_porcelain_v2(stdout), self.kind, self.repo)
@@ -1201,23 +1271,26 @@ class GitStatusStageCommand(TextCommand, GitStatusTextCmd):
                 self.add_update(repo, unstaged)
             goto = self.logical_goto_next_file()
 
+        self.show_git_errors()
         self.update_status(goto)
 
     def add(self, repo, files):
-        return self.git(['add', '--'] + files, cwd=repo)
+        return self.git_checked(['add', '--'] + files, repo)
 
     def add_update(self, repo, files):
-        return self.git(['add', '--update', '--'] + files, cwd=repo)
+        return self.git_checked(['add', '--update', '--'] + files, repo)
 
     def add_all(self, repo):
-        return self.git(['add', '--all'], cwd=repo)
+        return self.git_checked(['add', '--all'], repo)
 
     def add_all_unstaged(self, repo):
-        return self.git(['add', '--update', '.'], cwd=repo)
+        return self.git_checked(['add', '--update', '.'], repo)
 
     def add_all_untracked(self, repo):
         untracked = self.git_lines(['ls-files', '--other', '--exclude-standard'], cwd=repo)
-        return self.git(['add', '--'] + untracked, cwd=repo)
+        if not untracked:
+            return (0, '', '')
+        return self.git_checked(['add', '--'] + untracked, repo)
 
 
 class GitStatusUnstageCommand(TextCommand, GitStatusTextCmd):
@@ -1237,6 +1310,7 @@ class GitStatusUnstageCommand(TextCommand, GitStatusTextCmd):
                 self.unstage(repo, staged)
                 goto = self.logical_goto_next_file()
 
+        self.show_git_errors()
         self.update_status(goto)
 
     def no_commits(self, repo):
@@ -1244,13 +1318,13 @@ class GitStatusUnstageCommand(TextCommand, GitStatusTextCmd):
 
     def unstage(self, repo, files):
         if self.no_commits(repo):
-            return self.git(['rm', '--cached', '--'] + files, cwd=repo)
-        return self.git(['reset', '-q', 'HEAD', '--'] + files, cwd=repo)
+            return self.git_checked(['rm', '--cached', '--'] + files, repo)
+        return self.git_checked(['reset', '-q', 'HEAD', '--'] + files, repo)
 
     def unstage_all(self, repo):
         if self.no_commits(repo):
-            return self.git(['rm', '-r', '--cached', '.'], cwd=repo)
-        return self.git(['reset', '-q', 'HEAD'], cwd=repo)
+            return self.git_checked(['rm', '-r', '--cached', '.'], repo)
+        return self.git_checked(['reset', '-q', 'HEAD'], repo)
 
 
 class GitStatusOpenFileCommand(TextCommand, GitStatusTextCmd):
@@ -1340,7 +1414,7 @@ class GitStatusIgnoreCommand(TextCommand, GitStatusTextCmd):
         msg += "\n".join(patterns[:10])
         if len(patterns) > 10:
             msg += "\n"
-            msg += "(%s more...)" % len(patterns) - 10
+            msg += "(%s more...)" % (len(patterns) - 10)
         return sublime.ok_cancel_dialog(msg, button)
 
     def add_to_gitignore(self, repo, patterns):
@@ -1407,22 +1481,23 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
         elif discard == "all":
             self.discard_all(repo)
 
+        self.show_git_errors()
         self.update_status(goto)
 
     # global discards
 
     def discard_all_stashes(self, repo):
         if sublime.ok_cancel_dialog('Discard all stashes?', 'Discard'):
-            self.git(['stash', 'clear'], cwd=repo)
+            self.git_checked(['stash', 'clear'], repo)
 
     def discard_all_untracked(self, repo):
         if sublime.ok_cancel_dialog(self.DELETE_UNTRACKED_CONFIRMATION, 'Delete'):
-            self.git(['clean', '-d', '--force'], cwd=repo)
+            self.git_checked(['clean', '-d', '--force'], repo)
 
     def discard_all(self, repo):
         if sublime.ok_cancel_dialog("Discard all staged and unstaged changes?", "Discard"):
             if sublime.ok_cancel_dialog("Are you absolutely sure?", "Discard"):
-                self.git(['reset', '--hard'], cwd=repo)
+                self.git_checked(['reset', '--hard'], repo)
 
     # individual discards
 
@@ -1435,7 +1510,7 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
         if sublime.ok_cancel_dialog(msgtemplate.format(stashes=stashlist), 'Discard'):
             nums = reversed(sorted(int(n) for n, _ in stashes))
             for n in nums:
-                self.git(['stash', 'drop', '--quiet', 'stash@{%s}' % n], cwd=repo)
+                self.git_checked(['stash', 'drop', '--quiet', 'stash@{%s}' % n], repo)
 
     def discard_files(self, repo, files):
         # Gather the state of every selected file up front, with a constant
@@ -1469,7 +1544,7 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
             if staged and f in errlist:
                 continue
 
-            if s == UNTRACKED_FILES or status == 'N':
+            if s == UNTRACKED_FILES or status == 'A':
                 action = 'Delete: '
             elif status == 'D':
                 action = 'Resurrect: '
@@ -1494,17 +1569,19 @@ class GitStatusDiscardCommand(TextCommand, GitStatusTextCmd):
                 continue
 
             if s == UNTRACKED_FILES:
-                self.git(['clean', '-d', '--force', '--', f], cwd=repo)
+                self.git_checked(['clean', '-d', '--force', '--', f], repo)
             elif status == 'D':
-                self.git(['reset', '-q', '--', f], cwd=repo)
-                self.git(['checkout', '--', f], cwd=repo)
-            elif status == 'N':
-                self.git(['rm', '-f', '--', f], cwd=repo)
+                if self.git_checked(['reset', '-q', '--', f], repo)[0] == 0:
+                    self.git_checked(['checkout', '--', f], repo)
+            elif status == 'A':
+                # a new file (staged, or added with --intent-to-add): there
+                # is nothing in HEAD to go back to, so delete it
+                self.git_checked(['rm', '-f', '--', f], repo)
             else:
                 if staged:
-                    self.git(['checkout', 'HEAD', '--', f], cwd=repo)
+                    self.git_checked(['checkout', 'HEAD', '--', f], repo)
                 else:
-                    self.git(['checkout', '--', f], cwd=repo)
+                    self.git_checked(['checkout', '--', f], repo)
 
     # bulk status helpers
 

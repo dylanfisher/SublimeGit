@@ -5,8 +5,8 @@ from sublime_plugin import WindowCommand, TextCommand, EventListener
 
 from .util import find_view_by_settings, noop, get_setting
 from .cmd import GitCmd
-from .helpers import GitStatusHelper
-from .status import GIT_WORKING_DIR_CLEAN
+from .helpers import GitStatusHelper, GitBranchHelper
+from .status import GIT_WORKING_DIR_CLEAN, run_async
 
 
 GIT_COMMIT_VIEW_TITLE = "COMMIT_EDITMSG"
@@ -18,8 +18,8 @@ GIT_COMMIT_TEMPLATE = """{old_msg}
 # with '#' will be ignored, and an empty message aborts the commit.
 {status}"""
 
-GIT_AMEND_PUSHED = ("It is discouraged to rewrite history which has already been pushed. "
-                    "Are you sure you want to amend the commit?")
+GIT_AMEND_PUSHED = ("The last commit has already been pushed to {remotes}. It is discouraged to "
+                    "rewrite history which has already been pushed. Are you sure you want to amend the commit?")
 
 GIT_UNDO_COMMIT = ("Undo the last commit?\n\n{subject}\n\nThe commit is removed from the branch; "
                    "its changes are kept, staged, in the working tree.")
@@ -35,6 +35,14 @@ CUT_EXPLANATION = "# Do not touch the line above.\n# Everything below will be re
 class GitCommit(object):
 
     windows = {}
+
+
+def commit_output(exit, stdout, stderr):
+    """What to show after ``git commit``: hooks and most errors write to
+    stderr, the summary (and "nothing to commit") to stdout, so show both;
+    the error part first when the commit failed."""
+    parts = [stdout, stderr] if exit == 0 else [stderr, stdout]
+    return "\n".join(p.strip('\n') for p in parts if p.strip())
 
 
 class GitCommitWindowCmd(GitCmd, GitStatusHelper):
@@ -78,9 +86,25 @@ class GitCommitWindowCmd(GitCmd, GitStatusHelper):
         return GIT_COMMIT_TEMPLATE.format(status=status, old_msg=old_msg)
 
     def show_commit_panel(self, content):
-        panel = self.window.get_output_panel('git-commit')
-        panel.run_command('git_panel_write', {'content': content})
-        self.window.run_command('show_panel', {'panel': 'output.git-commit'})
+        show_commit_panel(self.window, content)
+
+    def run_commit(self, window, repo, cmd, message):
+        """Run ``git commit`` off the UI thread (pre-commit hooks can take a
+        while), then show its output and refresh the status view."""
+        def work():
+            return self.git(cmd, stdin=message, cwd=repo)
+
+        def done(result):
+            show_commit_panel(window, commit_output(*result))
+            window.run_command('git_status', {'refresh_only': True})
+
+        run_async(work, done, 'Committing...')
+
+
+def show_commit_panel(window, content):
+    panel = window.get_output_panel('git-commit')
+    panel.run_command('git_panel_write', {'content': content})
+    window.run_command('show_panel', {'panel': 'output.git-commit'})
 
 
 class GitCommitCommand(WindowCommand, GitCommitWindowCmd):
@@ -117,7 +141,7 @@ class GitCommitCommand(WindowCommand, GitCommitWindowCmd):
         view.run_command('git_commit_template', {'template': template})
 
 
-class GitCommitAmendCommand(GitCommitWindowCmd, WindowCommand):
+class GitCommitAmendCommand(GitCommitWindowCmd, GitBranchHelper, WindowCommand):
     """
     Documentation coming soon.
     """
@@ -127,9 +151,9 @@ class GitCommitAmendCommand(GitCommitWindowCmd, WindowCommand):
         if not repo:
             return
 
-        unpushed = self.git_exit_code(['diff', '--exit-code', '--quiet', '@{upstream}..'], cwd=repo)
-        if unpushed == 0:
-            if not sublime.ok_cancel_dialog(GIT_AMEND_PUSHED, 'Amend commit'):
+        remotes = self.get_remote_branches_containing(repo, 'HEAD')
+        if remotes:
+            if not sublime.ok_cancel_dialog(GIT_AMEND_PUSHED.format(remotes=', '.join(remotes)), 'Amend commit'):
                 return
 
         view = find_view_by_settings(self.window, git_view='commit', git_repo=repo)
@@ -181,11 +205,14 @@ class GitCommitEventListener(EventListener):
 
             # Other lines should be at most 72 chars
             view.erase_regions('git-commit.others')
+            too_long = []
             for l in view.lines(sublime.Region(view.text_point(2, 0), view.size())):
                 if view.substr(l).startswith('#'):
                     break
                 if l.end() - l.begin() > 72:
-                    view.add_regions('git-commit.others', [sublime.Region(l.begin() + 72, l.end())], 'invalid', 'dot')
+                    too_long.append(sublime.Region(l.begin() + 72, l.end()))
+            if too_long:
+                view.add_regions('git-commit.others', too_long, 'invalid', 'dot')
 
     def on_modified_async(self, view):
         if get_setting('git_commit_pedantic') is True:
@@ -211,16 +238,13 @@ class GitCommitPerformCommand(WindowCommand, GitCommitWindowCmd):
                '--amend' if amend else None,
                '--verbose' if self.is_verbose else None, '-F', '-']
 
-        exit, stdout, stderr = self.git(cmd, stdin=message, cwd=repo)
-
-        self.show_commit_panel(stdout if exit == 0 else stderr)
-        self.window.run_command('git_status', {'refresh_only': True})
+        self.run_commit(self.window, repo, cmd, message)
 
     def is_visible(self):
         return False
 
 
-class GitUndoCommitCommand(WindowCommand, GitCmd):
+class GitUndoCommitCommand(WindowCommand, GitCmd, GitBranchHelper):
     """
     Undo the last commit, keeping its changes staged (``git reset --soft HEAD~1``).
 
@@ -241,7 +265,7 @@ class GitUndoCommitCommand(WindowCommand, GitCmd):
         if self.git_exit_code(['rev-parse', '-q', '--verify', 'HEAD~1'], cwd=repo) != 0:
             return sublime.error_message(GIT_UNDO_NO_PARENT)
 
-        remotes = self.git_lines(['branch', '-r', '--contains', 'HEAD', '--format=%(refname:short)'], cwd=repo)
+        remotes = self.get_remote_branches_containing(repo, 'HEAD')
         if remotes:
             if not sublime.ok_cancel_dialog(GIT_UNDO_PUSHED.format(remotes=', '.join(remotes)), 'Undo commit'):
                 return
@@ -302,12 +326,10 @@ class GitQuickCommitCommand(WindowCommand, GitCommitWindowCmd):
         # input panel was open (one process, as before)
         staged, _ = self.get_changes(repo)
         cmd = ['commit', '-F', '-'] if staged else ['commit', '-a', '-F', '-']
-        stdout = self.git_string(cmd, stdin=msg, cwd=repo)
-        self.show_commit_panel(stdout)
-        self.window.run_command('git_status', {'refresh_only': True})
+        self.run_commit(self.window, repo, cmd, msg)
 
 
-class GitQuickCommitCurrentFileCommand(TextCommand, GitCmd, GitStatusHelper):
+class GitQuickCommitCurrentFileCommand(TextCommand, GitCommitWindowCmd):
     """
     Documentation coming soon.
     """
@@ -338,14 +360,5 @@ class GitQuickCommitCurrentFileCommand(TextCommand, GitCmd, GitStatusHelper):
         if not msg:
             msg = ''
 
-        # run command
         cmd = ['commit', '-F', '-', '--only', '--', filename]
-        stdout = self.git_string(cmd, stdin=msg, cwd=repo)
-
-        # show output panel
-        panel = self.view.window().get_output_panel('git-commit')
-        panel.run_command('git_panel_write', {'content': stdout})
-        self.view.window().run_command('show_panel', {'panel': 'output.git-commit'})
-
-        # update status if necessary
-        self.view.window().run_command('git_status', {'refresh_only': True})
+        self.run_commit(self.view.window(), repo, cmd, msg)

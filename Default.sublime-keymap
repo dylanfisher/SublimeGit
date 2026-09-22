@@ -6,6 +6,11 @@
         "context": [{ "key": "selector", "operator": "equal", "operand": "meta.git-log.line" }]
     },
 
+    // Load more commits (on the last line of a log cut off at git_log_max_count)
+    { "keys": ["enter"], "command": "git_log_graph_load_more",
+        "context": [{ "key": "selector", "operator": "equal", "operand": "meta.git-log.load-more" }]
+    },
+
     // Refresh
     { "keys": ["r"], "command": "git_log_graph_refresh",
         "context": [{ "key": "selector", "operator": "equal", "operand": "text.git-log" }]

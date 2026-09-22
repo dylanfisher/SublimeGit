@@ -364,12 +364,13 @@ def test_stub_lines_matches_real_sublime_trailing_empty_line():
         assert [t for t, _ in _Cmd(view).iter_lines()] == content.split('\n'), content
 
 
-def test_re_diff_head_behaviour_is_unchanged():
-    """RE_DIFF_HEAD's ``{3}`` repeats the whole alternation, so it needs nine
-    dashes and never matches a real '--- a/f' line. Pinned as-is: such lines
-    fall through to the generic 'state == header' branch, which covers them
-    into the header anyway, so the parse result is the same either way."""
+def test_re_diff_head_matches_file_header_lines():
+    """RE_DIFF_HEAD matches the ``---``/``+++`` lines of a file header,
+    including the ``/dev/null`` side of a new or deleted file."""
     assert isinstance(RE_DIFF_HEAD, re.Pattern)
-    assert RE_DIFF_HEAD.match('--- a/one.py') is None
-    assert RE_DIFF_HEAD.match('+++ b/one.py') is None
-    assert RE_DIFF_HEAD.match('--------- a/one.py') is not None
+    assert RE_DIFF_HEAD.match('--- a/one.py') is not None
+    assert RE_DIFF_HEAD.match('+++ b/one.py') is not None
+    assert RE_DIFF_HEAD.match('--- /dev/null') is not None
+    assert RE_DIFF_HEAD.match('+++ /dev/null') is not None
+    assert RE_DIFF_HEAD.match('--------- a/one.py') is None
+    assert RE_DIFF_HEAD.match('-- a/one.py') is None

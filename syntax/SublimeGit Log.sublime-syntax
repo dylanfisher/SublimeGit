@@ -30,3 +30,6 @@ contexts:
         10: string.other.git-log.refs
     - match: '^{{graph}}+$'
       scope: comment.other.git-log.graph
+    # appended when the log is cut off at git_log_max_count
+    - match: '^-- Showing the latest \d+ commits\..*$'
+      scope: meta.git-log.load-more comment.other.git-log.load-more

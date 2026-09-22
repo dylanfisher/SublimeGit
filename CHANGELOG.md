@@ -6,6 +6,62 @@ newest first. Upstream's own release notes (the old Package Control
 `messages/` files) were removed; the original documentation at
 <https://sublimegit.readthedocs.io/en/latest/> still applies.
 
+## Fix a batch of bugs and move slow git calls off the UI thread
+
+### Fixed
+
+- Discarding a staged new file in the status view deleted nothing: the file
+  is reported as `A` (not `N`), fell through to `git checkout HEAD -- <file>`
+  and the error was swallowed. It is now removed (`git rm -f`) and the
+  confirmation says "Delete".
+- `Git: Snapshot` on a clean tree re-applied whatever stash was already on
+  top. It now uses `git stash create` + `git stash store`, which never touches
+  the working tree, and reports "No local changes to save" when there is
+  nothing to save.
+- `Git: Stash` refused to stash when only staged changes existed. It now uses
+  `git stash push -m` instead of the deprecated `git stash save`, and reports
+  git errors.
+- Ignoring more than 10 files from the status view crashed with a `TypeError`.
+- Pedantic commit messages only marked the last line over 72 characters.
+- Quick commits (and `Git: Commit`) showed an empty panel when a hook
+  rejected the commit; the panel now shows stdout and stderr.
+- `Git: Quick Log Current File` crashed on an unsaved view.
+- Fetch, push, pull, remote show/prune and custom commands re-opened their
+  output panel for every line of output, including after you closed it.
+- `Git: Checkout Current File` on an untracked file showed a literal `%s`.
+- Stage, unstage and discard in the status view now report git failures
+  instead of silently refreshing.
+- `Git: Amend Commit` decides whether the commit was pushed with
+  `git branch -r --contains HEAD`, like `Git: Undo Commit`, instead of
+  comparing trees with `@{upstream}`; the warning names the remote branches.
+- The "executable not found" error splits `PATH` on `os.pathsep`, so it is
+  readable on Windows.
+- `RE_DIFF_HEAD` in the diff view now matches `---`/`+++` header lines
+  (harmless before, the fallback branch covered them).
+
+### Changed
+
+- Network commands (fetch, push, pull, `ls-remote`, `remote show/prune/update`)
+  no longer hold the per-repository lock, so a push stuck on the network or
+  on credentials no longer freezes every other git call in that repository.
+  All git processes run with `GIT_TERMINAL_PROMPT=0`, so a credential prompt
+  fails right away instead of hanging, and async commands get no stdin.
+- The status view and status bar refreshes and the diff view run git with
+  `GIT_OPTIONAL_LOCKS=0`: they never take `index.lock`, and so skip the repo
+  lock too.
+- Committing (pre-commit hooks), merging and rebasing run off the UI thread,
+  with a spinner in the status bar. `Git: Log Current File` and `Git: Show`
+  views are filled off the UI thread like the status and diff views.
+- New `git_log_max_count` setting (default 1000; 0 for no limit). `Git: Log`
+  ends with a "load more" line (`enter` on it loads that many more);
+  `Git: Quick Log`, `Git: Quick Log Current File` and `Git: Checkout Commit`
+  end with a "Load more commits..." item.
+- Refreshing the status, diff and log views on focus no longer rewrites the
+  buffer (or moves the caret) when nothing changed.
+- Diffs of untracked files are built in Python instead of starting one
+  `git diff --no-index` per file; binary files, symlinks and paths git would
+  quote still go through git. The output is byte-for-byte the same.
+
 ## Show diffs for untracked files
 
 ### Changed

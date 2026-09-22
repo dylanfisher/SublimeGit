@@ -116,15 +116,9 @@ class GitCheckoutCommitCommand(WindowCommand, GitCheckoutWindowCmd):
         if not repo:
             return
 
-        log = self.get_quick_log(repo)
-        hashes, choices = self.format_quick_log(log)
-        self.window.show_quick_panel(choices, partial(self.on_done, repo, hashes))
+        self.show_quick_log_panel(self.window, repo, partial(self.on_commit, repo))
 
-    def on_done(self, repo, hashes, idx):
-        if idx == -1:
-            return
-
-        commit = hashes[idx]
+    def on_commit(self, repo, commit):
         exit, stdout, stderr = self.git(['checkout', commit], cwd=repo)
         if exit == 0:
             panel = self.window.get_output_panel('git-checkout')
@@ -245,7 +239,7 @@ class GitCheckoutCurrentFileCommand(TextCommand, GitCmd, GitStatusHelper):
             return
 
         if not self.file_in_git(repo, filename):
-            sublime.error_message("The file %s is not tracked by git.")
+            sublime.error_message("The file %s is not tracked by git." % filename)
             return
 
         exit, stdout, stderr = self.git(['checkout', '--quiet', '--', filename], cwd=repo)

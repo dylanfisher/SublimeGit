@@ -8,6 +8,9 @@ from .cmd import GitCmd
 from .helpers import GitStashHelper, GitStatusHelper, GitErrorHelper, KIND_STASH
 
 
+NO_LOCAL_CHANGES = "No local changes to save"
+
+
 class GitStashWindowCmd(GitCmd, GitStashHelper, GitErrorHelper):
 
     def pop_or_apply_from_panel(self, action):
@@ -40,7 +43,7 @@ class GitStashWindowCmd(GitCmd, GitStashHelper, GitErrorHelper):
         return inner
 
 
-class GitStashCommand(WindowCommand, GitCmd, GitStatusHelper):
+class GitStashCommand(WindowCommand, GitCmd, GitStatusHelper, GitErrorHelper):
     """
     Documentation coming soon.
     """
@@ -52,23 +55,31 @@ class GitStashCommand(WindowCommand, GitCmd, GitStatusHelper):
 
         def on_done(title):
             title = title.strip()
-            self.git(['stash', 'save', '--include-untracked' if untracked else None, '--', title], cwd=repo)
+            cmd = ['stash', 'push', '--include-untracked' if untracked else None]
+            if title:
+                cmd.extend(['-m', title])
+            exit, stdout, stderr = self.git(cmd, cwd=repo)
+            if exit != 0:
+                sublime.error_message(self.format_error_message(stderr or stdout))
             self.window.run_command('git_status', {'refresh_only': True})
 
         # get files status (the status call refreshes the index itself)
-        untracked_files, unstaged_files, _ = self.get_files_status(repo)
+        untracked_files, unstaged_files, staged_files = self.get_files_status(repo)
 
         # check for if there's something to stash
-        if not unstaged_files:
+        if not unstaged_files and not staged_files:
             if (untracked and not untracked_files) or (not untracked):
-                return sublime.error_message("No local changes to save")
+                return sublime.error_message(NO_LOCAL_CHANGES)
 
         self.window.show_input_panel('Stash title:', '', on_done, noop, noop)
 
 
 class GitSnapshotCommand(WindowCommand, GitStashWindowCmd):
     """
-    Documentation coming soon.
+    Save the current changes as a stash without touching the working tree.
+
+    Uses ``git stash create`` + ``git stash store``, so the working tree and
+    index are left exactly as they were. Untracked files are not included.
     """
 
     def run(self):
@@ -77,8 +88,19 @@ class GitSnapshotCommand(WindowCommand, GitStashWindowCmd):
             return
 
         snapshot = time.strftime("Snapshot at %Y-%m-%d %H:%M:%S")
-        self.git(['stash', 'save', '--', snapshot], cwd=repo)
-        self.git(['stash', 'apply', '-q', 'stash@{0}'], cwd=repo)
+        exit, sha, stderr = self.git(['stash', 'create', snapshot], cwd=repo)
+        sha = sha.strip()
+        if exit != 0:
+            return sublime.error_message(self.format_error_message(stderr))
+        if not sha:
+            # nothing to save; stash create makes no commit and prints nothing
+            return sublime.error_message(NO_LOCAL_CHANGES)
+
+        exit, _, stderr = self.git(['stash', 'store', '-m', snapshot, sha], cwd=repo)
+        if exit != 0:
+            sublime.error_message(self.format_error_message(stderr))
+        else:
+            sublime.status_message(snapshot)
         self.window.run_command('git_status', {'refresh_only': True})
 
 

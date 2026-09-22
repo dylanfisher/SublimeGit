@@ -169,6 +169,16 @@
      "git_fetch_prune": true,
 
     /*
+     * Log size
+     *
+     * How many commits Git: Log, Git: Quick Log, Git: Quick Log Current
+     * File and Git: Checkout Commit load at a time. When a history is
+     * longer, the log ends with a "load more" line (or quick panel item)
+     * that loads this many more. Set to 0 to always load the whole history.
+     */
+    "git_log_max_count": 1000,
+
+    /*
      * Warning when opening multiple tabs from a blame view.
      *
      * If set to true, you will receive a warning when your

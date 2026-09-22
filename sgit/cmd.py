@@ -3,6 +3,7 @@ import subprocess
 import logging
 import threading
 import webbrowser
+from contextlib import contextmanager
 from datetime import datetime
 from functools import partial
 
@@ -44,6 +45,52 @@ def reset_repo_locks():
         _repo_locks.clear()
 
 
+@contextmanager
+def _no_lock():
+    yield
+
+
+# Git commands that talk to a remote. They can run for a long time (a slow
+# network, a credential helper waiting for input), so they never hold the
+# repo lock: a push that hangs must not freeze every UI-thread git call in
+# the same repo behind it.
+NETWORK_COMMANDS = frozenset(['fetch', 'push', 'pull', 'clone', 'ls-remote'])
+NETWORK_REMOTE_SUBCOMMANDS = frozenset(['show', 'prune', 'update'])
+
+
+def is_network_command(cmd):
+    args = [c for c in cmd if c]
+    if not args:
+        return False
+    if args[0] in NETWORK_COMMANDS:
+        return True
+    return args[0] == 'remote' and len(args) > 1 and args[1] in NETWORK_REMOTE_SUBCOMMANDS
+
+
+# Read-only calls made from worker threads (status view and status bar
+# refreshes, diff views) run with GIT_OPTIONAL_LOCKS=0. Git then never takes
+# ``index.lock`` for them (it skips writing back the refreshed index), which
+# is the race the repo lock exists for, so they skip the repo lock as well
+# and never queue behind a slow command from the UI thread, or the other way
+# round. The flag is per thread so UI-thread calls are unaffected.
+_read_only = threading.local()
+
+
+@contextmanager
+def read_only_git():
+    """Run every git call made by this thread inside the block read-only."""
+    previous = getattr(_read_only, 'active', False)
+    _read_only.active = True
+    try:
+        yield
+    finally:
+        _read_only.active = previous
+
+
+def is_read_only():
+    return getattr(_read_only, 'active', False)
+
+
 class Cmd(object):
     started_at = datetime.today()
     last_popup_at = None
@@ -72,7 +119,7 @@ class Cmd(object):
         bin = get_executable(self.executable, self.bin)
         return bin + self.opts + [c for c in cmd if c]
 
-    def env(self):
+    def env(self, read_only=False):
         env = os.environ.copy()
         path = get_setting('git_force_path', [])
         if path:
@@ -80,7 +127,20 @@ class Cmd(object):
                 env['PATH'] = os.pathsep.join(path)
             elif isinstance(path, str):
                 env['PATH'] = path
+        # There is no terminal to answer a username/password prompt on, so
+        # make git fail right away instead of waiting on one forever.
+        env.setdefault('GIT_TERMINAL_PROMPT', '0')
+        if read_only:
+            env['GIT_OPTIONAL_LOCKS'] = '0'
         return env
+
+    def uses_repo_lock(self, cmd):
+        return True
+
+    def lock_for(self, cmd, cwd, read_only=False):
+        if read_only or not self.uses_repo_lock(cmd):
+            return _no_lock()
+        return repo_lock(cwd)
 
     def startupinfo(self):
         startupinfo = None
@@ -106,9 +166,11 @@ class Cmd(object):
             raise
 
     # sync commands
-    def cmd(self, cmd, stdin=None, cwd=None, ignore_errors=False, encoding=None, fallback=None):
+    def cmd(self, cmd, stdin=None, cwd=None, ignore_errors=False, encoding=None, fallback=None, read_only=None):
+        if read_only is None:
+            read_only = is_read_only()
         command = self.build_command(cmd)
-        environment = self.env()
+        environment = self.env(read_only=read_only)
         encoding = encoding or get_setting('encoding', 'utf-8')
         fallback = fallback or get_setting('fallback_encodings', [])
 
@@ -118,7 +180,7 @@ class Cmd(object):
             if stdin and hasattr(stdin, 'encode'):
                 stdin = stdin.encode(encoding)
 
-            with repo_lock(cwd):
+            with self.lock_for(cmd, cwd, read_only):
                 proc = subprocess.Popen(command,
                                         stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE,
@@ -148,13 +210,15 @@ class Cmd(object):
         environment = self.env()
         encoding = get_setting('encoding', 'utf-8')
         fallback = get_setting('fallback_encodings', [])
+        lock = self.lock_for(cmd, cwd)
 
         def async_inner(cmd, cwd, encoding, on_data=None, on_complete=None, on_error=None, on_exception=None):
             try:
                 logger.debug('async-cmd: %s', cmd)
 
-                with repo_lock(cwd):
+                with lock:
                     proc = subprocess.Popen(cmd,
+                                            stdin=subprocess.DEVNULL,
                                             stdout=subprocess.PIPE,
                                             stderr=subprocess.STDOUT,
                                             startupinfo=self.startupinfo(),
@@ -190,7 +254,7 @@ class Cmd(object):
                         "Try adjusting the git_executables['{executable}'] setting.")
 
     def get_executable_error(self):
-        path = "\n".join(os.environ.get('PATH', '').split(':'))
+        path = "\n".join(os.environ.get('PATH', '').split(os.pathsep))
         return self.EXECUTABLE_ERROR.format(executable=self.executable,
                                             path=path,
                                             bin=self.bin)
@@ -219,6 +283,9 @@ class GitCmd(GitRepoHelper, Cmd):
         '-c', 'status.displayCommentPrefix=true',
         '-c', 'core.commentchar=#',
     ]
+
+    def uses_repo_lock(self, cmd):
+        return not is_network_command(cmd)
 
     def git(self, cmd, *args, **kwargs):
         return self.cmd(cmd, *args, **kwargs)
