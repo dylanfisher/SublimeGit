@@ -6,6 +6,16 @@ newest first. Upstream's own release notes (the old Package Control
 `messages/` files) were removed; the original documentation at
 <https://sublimegit.readthedocs.io/en/latest/> still applies.
 
+## Show diffs for untracked files
+
+### Changed
+
+- `d` on an untracked file in the status view (and picking an untracked file
+  in `Git: Quick Status`) now opens a `*git-diff*` view showing the whole file
+  as added, instead of doing nothing or reporting "Cannot show diff for
+  untracked files". Staging hunks from that view adds the file to the index.
+  The whole-repository `Git: Diff` still leaves untracked files out.
+
 ## Add a graph log view
 
 ### Added

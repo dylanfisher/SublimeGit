@@ -564,7 +564,21 @@ class GitDiffHelper(object):
                 '--unified=%s' % unified if unified else None]
         if path:
             args.extend(['--', path])
-        return self.git_string(args, cwd=repo, strip=False)
+        diff = self.git_string(args, cwd=repo, strip=False)
+        if not cached and path and os.path.normpath(path) != os.path.normpath(repo):
+            diff += self.get_untracked_diff(repo, path, unified)
+        return diff
+
+    def get_untracked_diff(self, repo, path, unified=None):
+        # show untracked files as new files, diffed against /dev/null
+        untracked = self.git_lines(['ls-files', '--others', '--exclude-standard', '--', path], cwd=repo)
+        diffs = []
+        for f in untracked:
+            if f:
+                diffs.append(self.git_string(['diff', '--no-index',
+                                              '--unified=%s' % unified if unified else None,
+                                              '--', os.devnull, f], cwd=repo, strip=False))
+        return ''.join(diffs)
 
 
 class GitShowHelper(object):

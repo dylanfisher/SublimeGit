@@ -1152,13 +1152,10 @@ class GitQuickStatusCommand(WindowCommand, GitCmd, GitStatusHelper):
                 return
             state, filename = status[idx][0:2], status[idx][3:]
             index, worktree = state
-            if state == '??':
-                return sublime.error_message("Cannot show diff for untracked files.")
-
             window = self.window
             if worktree != ' ':
                 window.run_command('git_diff', {'repo': repo, 'path': filename})
-            if index != ' ':
+            if index not in (' ', '?'):
                 window.run_command('git_diff', {'repo': repo, 'path': filename, 'cached': True})
 
         self.window.show_quick_panel(status, on_done, sublime.MONOSPACE_FONT)
@@ -1624,6 +1621,5 @@ class GitStatusDiffCommand(TextCommand, GitStatusTextCmd):
         window = self.view.window()
 
         for s, f in files:
-            if s != UNTRACKED_FILES:
-                cached = (s == STAGED_CHANGES)
-                window.run_command('git_diff', {'repo': repo, 'path': f, 'cached': cached})
+            cached = (s == STAGED_CHANGES)
+            window.run_command('git_diff', {'repo': repo, 'path': f, 'cached': cached})

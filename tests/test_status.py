@@ -24,12 +24,12 @@ from sgit.status import (GitStatusBarUpdater, GitStatusBuilder, GitStatusCommand
 from sgit.diff import (GitDiffRefreshCommand, GitDiffWriteCommand, GitDiffEventListener,
                        GIT_DIFF_CLEAN, GIT_DIFF_CLEAN_CACHED)
 from sgit.cmd import GitCmd
-from sgit.helpers import GitStatusHelper, GitStashHelper, GitLogHelper, GitBranchHelper, GitRemoteHelper
+from sgit.helpers import GitStatusHelper, GitStashHelper, GitLogHelper, GitBranchHelper, GitRemoteHelper, GitDiffHelper
 
 pytestmark = requires_git
 
 
-class RealGit(GitCmd, GitStatusHelper, GitStashHelper, GitLogHelper, GitRemoteHelper):
+class RealGit(GitCmd, GitStatusHelper, GitStashHelper, GitLogHelper, GitRemoteHelper, GitDiffHelper):
     pass
 
 
@@ -753,6 +753,22 @@ class TestHelpersAgainstRealGit(object):
         settings.set('git_status_untracked_files', 'none')
         assert RealGit().get_porcelain_status(tmp_repo.path) == []
 
+    def test_diff_of_untracked_file_shows_it_as_new(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n')
+        tmp_repo.write('sub/new.txt', 'x\ny\n')
+        g = RealGit()
+        diff = g.get_diff(tmp_repo.path, 'sub/new.txt')
+        assert 'diff --git a/sub/new.txt b/sub/new.txt' in diff
+        assert 'new file mode' in diff
+        assert '+x\n+y\n' in diff
+        # the patch stages cleanly, as hunks from the diff view would
+        g.git(['apply', '--cached', '-'], stdin=diff, cwd=tmp_repo.path)
+        assert g.get_porcelain_status(tmp_repo.path) == ['A  sub/new.txt']
+        # the whole-repo diff and the cached diff still leave untracked files out
+        tmp_repo.write('other.txt', 'o\n')
+        assert g.get_diff(tmp_repo.path) == ''
+        assert 'other.txt' not in g.get_diff(tmp_repo.path, 'sub/new.txt', cached=True)
+
     def test_quick_log(self, settings, tmp_repo):
         sha1 = tmp_repo.commit('a.txt', 'a\n', message='first')
         sha2 = tmp_repo.commit('b.txt', 'b\n', message='second')
@@ -1431,13 +1447,13 @@ class TestQuickStatusCommand(object):
             ('git_diff', {'repo': tmp_repo.path, 'path': 'a.txt', 'cached': True}),
         ]
 
-    def test_untracked_file_reports_an_error(self, settings, tmp_repo):
+    def test_untracked_file_opens_a_worktree_diff(self, settings, tmp_repo):
         tmp_repo.commit('a.txt', 'a\n')
         tmp_repo.write('u.txt', 'u\n')
         window, on_done = self.panel(tmp_repo)
         on_done(0)
-        assert window.commands == []
-        assert sublime.error_messages == ['Cannot show diff for untracked files.']
+        assert window.commands == [('git_diff', {'repo': tmp_repo.path, 'path': 'u.txt'})]
+        assert sublime.error_messages == []
 
 
 class TestStatusBarEventListener(object):
