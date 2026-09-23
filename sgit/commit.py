@@ -27,7 +27,8 @@ GIT_UNDO_COMMIT = ("Undo the last commit?\n\n{subject}\n\nThe commit is removed 
                    "its changes are kept, staged, in the working tree.")
 GIT_UNDO_PUSHED = ("The last commit has already been pushed to {remotes}. Undoing it rewrites "
                    "history that others may have. Undo it anyway?")
-GIT_UNDO_NO_PARENT = "The last commit is the root commit and cannot be undone with a soft reset."
+GIT_UNDO_ROOT_COMMIT = ("Undo the first commit?\n\n{subject}\n\nThe branch is left with no commits; "
+                        "its changes are kept, staged, in the working tree.")
 GIT_UNDO_NOTHING = "Nothing committed (yet)"
 
 CUT_LINE = "------------------------ >8 ------------------------\n"
@@ -260,7 +261,9 @@ class GitUndoCommitCommand(WindowCommand, GitCmd, GitBranchHelper):
 
     You are asked to confirm, and warned first if the commit is already
     contained in a remote tracking branch (i.e. it has been pushed). The
-    root commit of a repository cannot be undone this way.
+    root commit has no parent to reset to, so it is undone by deleting the
+    branch ref instead (``git update-ref -d HEAD``), which likewise keeps
+    its changes staged.
     """
 
     def run(self):
@@ -272,18 +275,21 @@ class GitUndoCommitCommand(WindowCommand, GitCmd, GitBranchHelper):
         if exit != 0:
             return sublime.error_message(GIT_UNDO_NOTHING)
 
-        if self.git_exit_code(['rev-parse', '-q', '--verify', 'HEAD~1'], cwd=repo) != 0:
-            return sublime.error_message(GIT_UNDO_NO_PARENT)
+        is_root = self.git_exit_code(['rev-parse', '-q', '--verify', 'HEAD~1'], cwd=repo) != 0
 
         remotes = self.get_remote_branches_containing(repo, 'HEAD')
         if remotes:
             if not sublime.ok_cancel_dialog(GIT_UNDO_PUSHED.format(remotes=', '.join(remotes)), 'Undo commit'):
                 return
 
-        if not sublime.ok_cancel_dialog(GIT_UNDO_COMMIT.format(subject=subject.strip()), 'Undo commit'):
+        confirm = GIT_UNDO_ROOT_COMMIT if is_root else GIT_UNDO_COMMIT
+        if not sublime.ok_cancel_dialog(confirm.format(subject=subject.strip()), 'Undo commit'):
             return
 
-        exit, stdout, stderr = self.git(['reset', '--soft', 'HEAD~1'], cwd=repo)
+        if is_root:
+            exit, stdout, stderr = self.git(['update-ref', '-d', 'HEAD'], cwd=repo)
+        else:
+            exit, stdout, stderr = self.git(['reset', '--soft', 'HEAD~1'], cwd=repo)
         if exit == 0:
             sublime.status_message('Undid commit %s' % subject.strip())
         else:

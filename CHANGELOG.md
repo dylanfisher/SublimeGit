@@ -131,9 +131,10 @@ newest first. Upstream's own release notes (the old Package Control
   or rebase after a confirmation. The state is detected through
   `git rev-parse --git-path` (`MERGE_HEAD`, `rebase-merge`, `rebase-apply`).
 - `Git: Undo Last Commit` runs `git reset --soft HEAD~1`, keeping the
-  changes staged. It shows the commit subject in the confirmation, refuses on
-  the root commit, and warns first when a remote-tracking branch already
-  contains the commit.
+  changes staged. It shows the commit subject in the confirmation and warns
+  first when a remote-tracking branch already contains the commit. The root
+  commit, which has no parent to reset to, is undone with
+  `git update-ref -d HEAD`, leaving the branch unborn with the files staged.
 - `Git: Delete Branch` lists local branches (with last subject and upstream)
   other than the current one. They are deleted with `-d`, and you are asked
   before forcing `-D` when git reports the branch is not fully merged.

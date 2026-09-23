@@ -11,7 +11,7 @@ from conftest import requires_git
 import sgit.cmd
 from sgit.cmd import GitCmd, repo_lock
 from sgit.branch import GitDeleteBranchCommand, GitDeleteMergedBranchesCommand, GIT_ONLY_CURRENT
-from sgit.commit import GitUndoCommitCommand, GIT_UNDO_NO_PARENT
+from sgit.commit import GitUndoCommitCommand
 from sgit.helpers import sort_remote_names, GitRemoteHelper, GitBranchHelper, KIND_BRANCH
 from sgit.log import GitLogCurrentFileCommand, GIT_LOG_VIEW_TITLE_PREFIX
 from sgit.merge import (GitMergeCommand, GitMergeAbortCommand, GitRebaseCommand, GitRebaseAbortCommand,
@@ -220,10 +220,23 @@ class TestUndoCommit(object):
         GitUndoCommitCommand(window_for(tmp_repo)).run()
         assert tmp_repo.git('rev-parse', 'HEAD') == second
 
-    def test_root_commit_cannot_be_undone(self, settings, tmp_repo):
-        root = tmp_repo.commit('a.txt', 'a\n', 'first')
+    def test_root_commit_deletes_branch_and_keeps_changes_staged(self, settings, tmp_repo):
+        tmp_repo.commit('a.txt', 'a\n', 'first')
+        branch = tmp_repo.git('symbolic-ref', '--short', 'HEAD')
+
         GitUndoCommitCommand(window_for(tmp_repo)).run()
-        assert sublime.error_messages == [GIT_UNDO_NO_PARENT]
+
+        assert len(sublime.ok_cancel_dialogs) == 1
+        assert 'first commit' in sublime.ok_cancel_dialogs[0][0]
+        assert tmp_repo.git('rev-parse', '-q', '--verify', 'HEAD', check=False) == ''
+        assert tmp_repo.git('symbolic-ref', '--short', 'HEAD') == branch
+        assert tmp_repo.git('status', '--porcelain') == 'A  a.txt'
+
+    def test_declined_root_commit_is_kept(self, settings, tmp_repo):
+        root = tmp_repo.commit('a.txt', 'a\n', 'first')
+        sublime.ok_cancel_answers.append(False)
+
+        GitUndoCommitCommand(window_for(tmp_repo)).run()
         assert tmp_repo.git('rev-parse', 'HEAD') == root
 
     def test_pushed_commit_warns_first(self, settings, tmp_repo):
