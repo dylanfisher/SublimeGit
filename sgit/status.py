@@ -685,9 +685,20 @@ def forget_view_refresh(view_id):
 
 
 # {repo: placeholder}: repos with a commit in flight. Their status view shows
-# the placeholder and skips refreshes until the commit lands, instead of
-# showing the files about to be committed as still staged.
+# the placeholder above a divider, over the status as it was, and skips
+# refreshes until the commit lands.
 _busy_repos = {}
+
+GIT_STATUS_BUSY_DIVIDER = "-" * 50 + "\n\n"
+
+
+def busy_status_content(placeholder, current):
+    """``placeholder`` and a divider on top of ``current``, the status view's
+    buffer, without stacking on a header an earlier call already added."""
+    _, divider, rest = current.partition(GIT_STATUS_BUSY_DIVIDER)
+    if divider:
+        current = rest
+    return placeholder + GIT_STATUS_BUSY_DIVIDER + current
 
 
 def set_status_busy(window, repo, placeholder):
@@ -695,7 +706,9 @@ def set_status_busy(window, repo, placeholder):
     view = find_view_by_settings(window, git_view='status', git_repo=repo)
     if view is not None:
         _refresh_state.invalidate(view.id())
-        view.run_command('git_status_write', {'content': placeholder, 'goto': 'point:0'})
+        current = view.substr(sublime.Region(0, view.size()))
+        view.run_command('git_status_write', {'content': busy_status_content(placeholder, current),
+                                              'goto': 'point:0'})
 
 
 def clear_status_busy(repo):

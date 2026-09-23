@@ -16,7 +16,8 @@ import sgit.status
 from sgit.cmd import Cmd, GitCmd, repo_lock, is_network_command
 from sgit.checkout import GitCheckoutCurrentFileCommand, GitCheckoutCommitCommand
 from sgit.commit import (GitCommit, GitCommitAmendCommand, GitCommitEventListener, GitCommitPerformCommand,
-                         GitQuickCommitCommand, commit_output, GIT_STATUS_COMMITTING)
+                         GitQuickCommitCommand, commit_output, is_empty_commit_message,
+                         GIT_STATUS_COMMITTING)
 from sgit.custom import GitCustomCommand
 from sgit.helpers import GitDiffHelper, GitLogHelper, LOAD_MORE_COMMITS, new_file_diff
 from sgit.log import (GitLogGraphRefreshCommand, GitLogGraphWriteCommand, GitLogGraphShowCommand,
@@ -217,12 +218,38 @@ class TestCommitOffTheUiThread(object):
         tmp_repo.write('a.txt', 'staged\n')
         tmp_repo.git('add', 'a.txt')
         window = window_for(tmp_repo)
-        status = sublime.View(window=window, settings={'git_view': 'status', 'git_repo': tmp_repo.path})
+        status = sublime.View(window=window, settings={'git_view': 'status', 'git_repo': tmp_repo.path},
+                              content='Staged changes:\n\tmodified   a.txt\n\n')
         window._views.append(status)
         commit = sublime.View(window=window, settings={'git_view': 'commit', 'git_repo': tmp_repo.path},
                               content='the message\n')
         GitCommit.windows[commit.id()] = (window, False, False)
         return window, status, commit
+
+    def test_empty_message_does_not_commit(self, settings, tmp_repo, monkeypatch, flush):
+        workers = []
+        monkeypatch.setattr(sgit.status, 'run_in_thread', workers.append)
+        window, status, commit = self._commit_setup(tmp_repo)
+        head = tmp_repo.git('rev-parse', 'HEAD')
+
+        GitCommitPerformCommand(window).run(tmp_repo.path, '\n# a comment\n\n')
+        assert workers == []
+        assert status.commands == []
+        assert tmp_repo.git('rev-parse', 'HEAD') == head
+        GitStatusRefreshCommand(status).run(None)
+        assert len(workers) == 1  # not marked busy
+
+    def test_is_empty_commit_message(self):
+        assert is_empty_commit_message('')
+        assert is_empty_commit_message('\n  \n# Please enter the commit message\n#\tmodified: a\n')
+        assert is_empty_commit_message('# comment\n# ' + sgit.commit.CUT_LINE + 'diff --git a/x b/x\n+hi\n')
+        assert not is_empty_commit_message('fix it\n# comment\n')
+        assert not is_empty_commit_message('\n  body only\n')
+
+    def test_busy_header_does_not_stack(self):
+        once = sgit.status.busy_status_content('Committing...\n', 'Head: abc x\n')
+        assert once == 'Committing...\n' + sgit.status.GIT_STATUS_BUSY_DIVIDER + 'Head: abc x\n'
+        assert sgit.status.busy_status_content('Committing...\n', once) == once
 
     def test_status_view_shows_a_placeholder_until_the_commit_lands(self, settings, tmp_repo, monkeypatch, flush):
         workers = []
@@ -236,7 +263,8 @@ class TestCommitOffTheUiThread(object):
         [(name, args)] = window.commands
         assert name == 'git_commit_perform'
         GitCommitPerformCommand(window).run(**args)
-        assert status.commands == [('git_status_write', {'content': GIT_STATUS_COMMITTING, 'goto': 'point:0'})]
+        content = GIT_STATUS_COMMITTING + sgit.status.GIT_STATUS_BUSY_DIVIDER + 'Staged changes:\n\tmodified   a.txt\n\n'
+        assert status.commands == [('git_status_write', {'content': content, 'goto': 'point:0'})]
 
         # focusing the status view mid-commit does not bring back the old files
         del status.commands[:]

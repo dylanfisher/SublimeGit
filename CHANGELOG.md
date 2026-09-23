@@ -52,8 +52,9 @@ newest first. Upstream's own release notes (the old Package Control
 - Committing (pre-commit hooks), merging and rebasing run off the UI thread,
   with a spinner in the status bar. `Git: Log Current File` and `Git: Show`
   views are filled off the UI thread like the status and diff views.
-  While a commit runs, the status view shows "Committing..." instead of
-  the files being committed, and refreshes once the commit lands.
+  While a commit runs, the status view shows "Committing..." and a divider
+  above the status as it was, and refreshes once the commit lands. Closing
+  the commit message view with an empty message aborts without running git.
 - New `git_log_max_count` setting (default 1000; 0 for no limit). `Git: Log`
   ends with a "load more" line (`enter` on it loads that many more);
   `Git: Quick Log`, `Git: Quick Log Current File` and `Git: Checkout Commit`

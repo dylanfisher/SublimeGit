@@ -34,6 +34,9 @@ contexts:
         1: comment.other.git-status.head
         2: entity.other.git-status.hex
         3: entity.other.git-status.log
+    # "Committing..." header over the old status while a commit runs.
+    - match: '^-{50}\n'
+      scope: comment.git-status.busy-divider
     - match: '^(Nothing to commit \(working directory clean\))\n'
       scope: meta.git-status.clean
       captures:

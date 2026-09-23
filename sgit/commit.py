@@ -14,6 +14,7 @@ GIT_COMMIT_VIEW_SYNTAX = 'Packages/SublimeGit/syntax/SublimeGit Commit Message.s
 
 GIT_NOTHING_STAGED = 'No changes added to commit. Use s on files/sections in the status view to stage changes.'
 GIT_STATUS_COMMITTING = "Committing...\n"
+GIT_COMMIT_EMPTY_MESSAGE = "Commit aborted: empty commit message"
 
 GIT_COMMIT_TEMPLATE = """{old_msg}
 # Please enter the commit message for your changes. Lines starting
@@ -46,6 +47,13 @@ def commit_output(exit, stdout, stderr):
     the error part first when the commit failed."""
     parts = [stdout, stderr] if exit == 0 else [stderr, stdout]
     return "\n".join(p.strip('\n') for p in parts if p.strip())
+
+
+def is_empty_commit_message(message):
+    """True when ``git commit --cleanup=strip`` would find nothing left of
+    ``message``: only comments, whitespace and a verbose diff."""
+    message = message.split("# " + CUT_LINE, 1)[0]
+    return not any(l.strip() for l in message.splitlines() if not l.startswith('#'))
 
 
 class GitCommitWindowCmd(GitCmd, GitStatusHelper):
@@ -244,6 +252,12 @@ class GitCommitEventListener(EventListener):
 class GitCommitPerformCommand(WindowCommand, GitCommitWindowCmd):
 
     def run(self, repo, message, add=False, amend=False):
+        # git would abort anyway; skip it so the status view is not marked
+        # as committing and no output panel pops up
+        if is_empty_commit_message(message):
+            sublime.status_message(GIT_COMMIT_EMPTY_MESSAGE)
+            return
+
         cmd = ['commit', '--cleanup=strip',
                '--all' if add else None,
                '--amend' if amend else None,
