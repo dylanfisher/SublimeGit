@@ -26,8 +26,8 @@ from .log import (GitLogCommand, GitLogGraphRefreshCommand, GitLogGraphWriteComm
                   GitLogCurrentFileCommand, GitLogRefreshCommand, GitLogWriteCommand,
                   GitLogGraphLoadMoreCommand)
 
-from .blame import (GitBlameCommand, GitBlameRefreshCommand, GitBlameShowCommand,
-                    GitBlameBlameCommand)
+from .blame import (GitBlameCommand, GitBlameRefreshCommand, GitBlameWriteCommand,
+                    GitBlameShowCommand, GitBlameBlameCommand)
 from .blame import GitBlameEventListener
 
 from .remote import (GitPushCurrentBranchCommand, GitPullCurrentBranchCommand,

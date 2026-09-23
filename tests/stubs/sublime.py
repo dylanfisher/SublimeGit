@@ -477,7 +477,7 @@ class View(object):
     def erase_regions(self, key):
         self._regions.pop(key, None)
 
-    def show_at_center(self, point):
+    def show_at_center(self, point, animate=True):
         pass
 
     def show(self, x, show_surrounds=True):

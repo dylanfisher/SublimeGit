@@ -273,7 +273,7 @@ class GitBlameWriteCommand(TextCommand):
             self.view.sel().clear()
             self.view.sel().add(sublime.Region(point))
             if not self.view.visible_region().contains(point):
-                sublime.set_timeout(lambda: self.view.show_at_center(point), 50)
+                sublime.set_timeout(lambda: self.view.show_at_center(point, animate=False), 50)
 
 
 class GitBlameEventListener(EventListener):
